@@ -6,7 +6,9 @@ import math
 import lmdb
 import torch
 import time
-
+sys.path.append('./Scatter')
+sys.path.append('../Scatter')
+import augs
 from natsort import natsorted
 from PIL import Image
 from PIL import ImageFile
@@ -15,10 +17,82 @@ import numpy as np
 from torch.utils.data import Dataset, ConcatDataset, Subset
 from torch._utils import _accumulate
 import torchvision.transforms as transforms
-device = torch.device('cuda')
+from itertools import islice, cycle
+
 import torch.nn.functional as F
 from nltk.metrics.distance import edit_distance
 
+device = torch.device('cuda')
+# device = torch.device('cpu')
+
+
+def get_transform():
+    transform = transforms.Compose([
+                                transforms.ColorJitter(brightness=(0.0, 0.3), contrast=(0.0,0.3), saturation = (0.0,0.2), hue= (0.0,0.2)),
+                                transforms.RandomAffine(degrees = 0, translate = (0.3, 0.3)),
+                                transforms.RandomPerspective(distortion_scale=0.3, p=0.5, interpolation=3, fill=0)
+                                ])
+    return transform
+
+
+
+class Dataset_streamer(Dataset):
+    
+    def __init__(self, dataset, resize_shape = (32, 200), input_channel = 3, transformer=None):
+        self.dataset = dataset
+        self.transformer = transformer
+        self.resize_H = resize_shape[0]
+        self.resize_W = resize_shape[1]
+        self.toTensor = transforms.ToTensor()
+        self.normalize_pad = NormalizePAD((input_channel, self.resize_H, self.resize_W))
+
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, idx):
+        
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        
+        img_path, label = self.dataset[idx]
+        image = Image.open(img_path).convert('RGB')
+        
+        #세로형 이미지 가로로 잘라옮기기
+        img_arr = np.asarray(image)
+        h, w, c = img_arr.shape
+        if h > w:
+            char_length = len(label)
+            each_char_height = int(np.ceil(h /char_length))
+            new_shape = np.zeros((each_char_height ,w * char_length, 3))
+            
+            for i in range(char_length):
+                cropped = img_arr[i*each_char_height : (i+1) * each_char_height, :, : ]
+                height = cropped.shape[0]
+                new_shape[ : height, i*w : (i+1)*w, : ] = cropped
+
+            image = Image.fromarray((new_shape*255).astype(np.uint8))
+        
+        # normalize with padding
+        img_tensor = self.toTensor(image)
+        orig_H = img_tensor.size(1)
+        orig_W = img_tensor.size(2)
+        ratio = orig_W / float(orig_H)
+        
+        if math.ceil(self.resize_H * ratio) > self.resize_W:
+            resize_W = self.resize_W
+        else :
+            resize_W = math.ceil(self.resize_H * ratio)
+        
+        image = np.array(image.resize((resize_W, self.resize_H), Image.BICUBIC))
+        image = self.normalize_pad(image)
+        
+        if self.transformer:
+            return (self.transformer(**{'image' : image, 'label' : label })['image'], label)
+        
+        else:
+            return (image, label)
+
+        
 class AttnLabelConverter(object):
     
     def __init__(self, character):
@@ -36,11 +110,16 @@ class AttnLabelConverter(object):
         # additional +1 for [GO] at first step. batch_text is padded with [GO]  token after [s] token.
         batch_text = torch.LongTensor(len(text), batch_max_length + 1).fill_(0)
         for i, t in enumerate(text):
+#             print('t', t)
             text = list(t)
+#             print('text', text)
             text.append('[s]')
+#             print('before encoded', text) 
             text = [self.dict[char] for char in text]
+#             print('encoded' ,text)
             batch_text[i][1 : 1+len(text)] = torch.LongTensor(text)
         return (batch_text.to(device), torch.IntTensor(length).to(device))
+#         return (batch_text, torch.IntTensor(length))
     
     
     def decode(self, text_index, length):
@@ -50,6 +129,59 @@ class AttnLabelConverter(object):
             texts.append(text)
             
         return texts
+    
+    
+    
+class CTCLabelConverter(object):
+    """ Convert between text-label and text-index """
+
+    def __init__(self, character):
+        # character (str): set of the possible characters.
+        dict_character = list(character)
+
+        self.dict = {}
+        for i, char in enumerate(dict_character):
+            # NOTE: 0 is reserved for 'CTCblank' token required by CTCLoss
+            self.dict[char] = i + 1
+
+        self.character = ['[CTCblank]'] + dict_character  # dummy '[CTCblank]' token for CTCLoss (index 0)
+
+    def encode(self, text, batch_max_length=25):
+        """convert text-label into text-index.
+        input:
+            text: text labels of each image. [batch_size]
+            batch_max_length: max length of text label in the batch. 25 by default
+        output:
+            text: text index for CTCLoss. [batch_size, batch_max_length]
+            length: length of each text. [batch_size]
+        """
+        length = [len(s) for s in text]
+
+        # The index used for padding (=0) would not affect the CTC loss calculation.
+        batch_text = torch.LongTensor(len(text), batch_max_length).fill_(0)
+        for i, t in enumerate(text):
+            text = list(t)
+            text = [self.dict[char] for char in text]
+            batch_text[i][:len(text)] = torch.LongTensor(text)
+        return (batch_text.to(device), torch.IntTensor(length).to(device))
+
+    def decode(self, text_index, length):
+        """ convert text-index into text-label. """
+        texts = []
+        for index, l in enumerate(length):
+            t = text_index[index, :]
+
+            char_list = []
+            for i in range(l):
+                if t[i] != 0 and (not (i > 0 and t[i - 1] == t[i])):  # removing repeated characters and blank.
+                    char_list.append(self.character[t[i]])
+            text = ''.join(char_list)
+
+            texts.append(text)
+        return texts
+    
+    
+    
     
 class Averager(object):
     
@@ -90,7 +222,7 @@ class NormalizePAD(object):
         if self.max_size[2] != w:
             Pad_img[:, :, w:] = img[:, :, w - 1].unsqueeze(2).expand(c, h, self.max_size[2] - w)
             
-        return Pad_img
+        return np.asarray(Pad_img)
         
 
 class ResizeNormalize(object):
@@ -108,16 +240,19 @@ class ResizeNormalize(object):
         
 class AlignCollate(object):
     
-    def __init__(self, imgH = 193, imgW = 370, keep_ratio_with_pad = True):
+    def __init__(self,  imgH = 193, imgW = 370, keep_ratio_with_pad = True, ):
         self.imgH = imgH
         self.imgW = imgW
         self.keep_ratio_with_pad = keep_ratio_with_pad
+
         
     def __call__(self, batch):
+#         if self.is_train :         
         batch = filter(lambda x : x is not None, batch)
         images, labels = zip(*batch)
+#         else:
+#             images = next(iter(batch))
 #         print(images)
-#         print(labels)
         if self.keep_ratio_with_pad :
             resized_max_w = self.imgW
             input_channel = 3 
@@ -162,8 +297,8 @@ def validation(model, criterion, evaluation_loader, converter, opt):
         text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(device)
 
         text_for_loss, length_for_loss = converter.encode(labels, batch_max_length=opt.batch_max_length)
-
         start_time = time.time()
+        
 #         if 'CTC' in opt.Prediction:
 #             preds = model(image, text_for_pred)
 #             forward_time = time.time() - start_time
@@ -177,7 +312,6 @@ def validation(model, criterion, evaluation_loader, converter, opt):
 #             _, preds_index = preds.max(2)
 #             preds_index = preds_index.view(-1)
 #             preds_str = converter.decode(preds_index.data, preds_size.data)
-
 
         preds = model(image, text_for_pred, is_train=False)
         forward_time = time.time() - start_time
@@ -199,7 +333,7 @@ def validation(model, criterion, evaluation_loader, converter, opt):
         preds_max_prob, _ = preds_prob.max(dim=2)
         confidence_score_list = []
         for gt, pred, pred_max_prob in zip(labels, preds_str, preds_max_prob):
-#             if 'Attn' in opt.Prediction:
+#             if 'f' in opt.Prediction:
             gt = gt[:gt.find('[s]')]
             pred_EOS = pred.find('[s]')
             pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
@@ -246,3 +380,5 @@ def validation(model, criterion, evaluation_loader, converter, opt):
     norm_ED = norm_ED / float(length_of_data)  # ICDAR2019 Normalized Edit Distance
 
     return valid_loss_avg.val(), accuracy, norm_ED, preds_str, confidence_score_list, labels, infer_time, length_of_data
+
+
