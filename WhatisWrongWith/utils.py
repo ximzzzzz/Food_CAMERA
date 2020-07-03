@@ -26,6 +26,20 @@ device = torch.device('cuda')
 # device = torch.device('cpu')
 
 
+def SaveDir_maker(base_model_dir = './models'):
+    trial_count = 0
+    mon = str(time.localtime().tm_mon) if len(str(time.localtime().tm_mon)) ==2 else '0'+str(time.localtime().tm_mon)
+    day = str(time.localtime().tm_mday) if len(str(time.localtime().tm_mday)) ==2 else '0'+str(time.localtime().tm_mday)
+    directory = f'scatter_{mon}{day}/{trial_count}'
+    empty_flag = True
+    while empty_flag :
+        if (os.path.exists(os.path.join(base_model_dir, directory))) and (os.path.isfile(os.path.join(base_model_dir, directory, 'best_accuracy.pth'))):
+            trial_count+=1
+            directory = f'scatter_{mon}{day}/{trial_count}'
+        else: 
+            empty_flag=False
+    return directory
+
 def get_transform():
     transform = transforms.Compose([
                                 transforms.ColorJitter(brightness=(0.0, 0.3), contrast=(0.0,0.3), saturation = (0.0,0.2), hue= (0.0,0.2)),
@@ -62,15 +76,19 @@ class Dataset_streamer(Dataset):
         h, w, c = img_arr.shape
         if h > w:
             char_length = len(label)
-            each_char_height = int(np.ceil(h /char_length))
-            new_shape = np.zeros((each_char_height ,w * char_length, 3))
-            
-            for i in range(char_length):
-                cropped = img_arr[i*each_char_height : (i+1) * each_char_height, :, : ]
-                height = cropped.shape[0]
-                new_shape[ : height, i*w : (i+1)*w, : ] = cropped
+            try :
+                each_char_height = int(np.ceil(h /char_length))
+                new_shape = np.zeros((each_char_height ,w * char_length, 3))
+                for i in range(char_length):
+                    cropped = img_arr[i*each_char_height : (i+1) * each_char_height, :, : ]
+                    height = cropped.shape[0]
+                    new_shape[ : height, i*w : (i+1)*w, : ] = cropped
 
-            image = Image.fromarray((new_shape*255).astype(np.uint8))
+                image = Image.fromarray((new_shape*255).astype(np.uint8))
+                
+            except :
+                img_path, label = self.dataset[idx+1]
+                image = Image.open(img_path).convert('RGB')
         
         # normalize with padding
         img_tensor = self.toTensor(image)
