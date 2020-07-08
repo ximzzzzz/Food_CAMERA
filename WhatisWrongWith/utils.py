@@ -18,7 +18,7 @@ from torch.utils.data import Dataset, ConcatDataset, Subset
 from torch._utils import _accumulate
 import torchvision.transforms as transforms
 from itertools import islice, cycle
-
+import cv2
 import torch.nn.functional as F
 from nltk.metrics.distance import edit_distance
 
@@ -26,19 +26,20 @@ device = torch.device('cuda')
 # device = torch.device('cpu')
 
 
-def SaveDir_maker(base_model_dir = './models'):
+def SaveDir_maker(base_model, base_model_dir = './models', ):
     trial_count = 0
     mon = str(time.localtime().tm_mon) if len(str(time.localtime().tm_mon)) ==2 else '0'+str(time.localtime().tm_mon)
     day = str(time.localtime().tm_mday) if len(str(time.localtime().tm_mday)) ==2 else '0'+str(time.localtime().tm_mday)
-    directory = f'scatter_{mon}{day}/{trial_count}'
+    directory = f'{base_model}_{mon}{day}/{trial_count}'
     empty_flag = True
     while empty_flag :
         if (os.path.exists(os.path.join(base_model_dir, directory))) and (os.path.isfile(os.path.join(base_model_dir, directory, 'best_accuracy.pth'))):
             trial_count+=1
-            directory = f'scatter_{mon}{day}/{trial_count}'
+            directory = f'{base_model}_{mon}{day}/{trial_count}'
         else: 
             empty_flag=False
     return directory
+
 
 def get_transform():
     transform = transforms.Compose([
@@ -48,6 +49,13 @@ def get_transform():
                                 ])
     return transform
 
+
+def tensor2im(image_tensor, imtype=np.uint8):
+    image_numpy = image_tensor.float().numpy()
+    if image_numpy.shape[0] == 1:
+        image_numpy = np.tile(image_numpy, (3, 1, 1))
+    image_numpy = (np.transpose(image_numpy, (1, 2, 0)) + 1) / 2.0 * 255.0
+    return image_numpy.astype(imtype)
 
 
 class Dataset_streamer(Dataset):
@@ -91,9 +99,11 @@ class Dataset_streamer(Dataset):
                 image = Image.open(img_path).convert('RGB')
         
         # normalize with padding
-        img_tensor = self.toTensor(image)
-        orig_H = img_tensor.size(1)
-        orig_W = img_tensor.size(2)
+#         img_tensor = self.toTensor(image)
+#         orig_H = img_tensor.size(1)
+#         orig_W = img_tensor.size(2)
+        orig_H = img_arr.shape[0]
+        orig_W = img_arr.shape[1]
         ratio = orig_W / float(orig_H)
         
         if math.ceil(self.resize_H * ratio) > self.resize_W:
@@ -103,6 +113,7 @@ class Dataset_streamer(Dataset):
         
         image = np.array(image.resize((resize_W, self.resize_H), Image.BICUBIC))
         image = self.normalize_pad(image)
+        image = tensor2im(image)
         
         if self.transformer:
             return (self.transformer(**{'image' : image, 'label' : label })['image'], label)
@@ -110,7 +121,9 @@ class Dataset_streamer(Dataset):
         else:
             return (image, label)
 
-        
+
+    
+    
 class AttnLabelConverter(object):
     
     def __init__(self, character):
@@ -198,8 +211,7 @@ class CTCLabelConverter(object):
             texts.append(text)
         return texts
     
-    
-    
+
     
 class Averager(object):
     
@@ -240,7 +252,8 @@ class NormalizePAD(object):
         if self.max_size[2] != w:
             Pad_img[:, :, w:] = img[:, :, w - 1].unsqueeze(2).expand(c, h, self.max_size[2] - w)
             
-        return np.asarray(Pad_img)
+#         return np.asarray(Pad_img)
+        return Pad_img
         
 
 class ResizeNormalize(object):
@@ -310,11 +323,16 @@ def validation(model, criterion, evaluation_loader, converter, opt):
         batch_size = image_tensors.size(0)
         length_of_data = length_of_data + batch_size
         image = image_tensors.to(device)
-        # For max length prediction
+
         length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
-        text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(device)
+#         text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(device)
+        text_for_pred = torch.FloatTensor(batch_size, opt.batch_max_length +1, len(opt.character)+2)
 
         text_for_loss, length_for_loss = converter.encode(labels, batch_max_length=opt.batch_max_length)
+        
+        onehot = torch.FloatTensor(batch_size, opt.batch_max_length+2, len(opt.character)+2).zero_().to(device)
+        text_for_loss = onehot.scatter(dim = 2, index = text_for_loss.unsqueeze(2).to(device), value = 1 ) #(bs, batch_max_length, num_characters)
+        
         start_time = time.time()
         
 #         if 'CTC' in opt.Prediction:
@@ -336,12 +354,14 @@ def validation(model, criterion, evaluation_loader, converter, opt):
 
         preds = preds[:, :text_for_loss.shape[1] - 1, :]
         target = text_for_loss[:, 1:]  # without [GO] Symbol
-        cost = criterion(preds.contiguous().view(-1, preds.shape[-1]), target.contiguous().view(-1))
+#         cost = criterion(preds.contiguous().view(-1, preds.shape[-1]), target.contiguous().view(-1))
+        cost = criterion(preds.contiguous().view(-1, preds.shape[-1]), target.contiguous().view(-1, target.shape[-1]))
 
         # select max probabilty (greedy decoding) then decode index to character
         _, preds_index = preds.max(2)
         preds_str = converter.decode(preds_index, length_for_pred)
-        labels = converter.decode(text_for_loss[:, 1:], length_for_loss)
+#         labels = converter.decode(text_for_loss[:, 1:], length_for_loss)
+        labels = converter.decode(text_for_loss[:, 1:].max(2)[1], length_for_loss)
 
         infer_time += forward_time
         valid_loss_avg.add(cost)

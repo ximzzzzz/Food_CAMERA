@@ -12,6 +12,7 @@ import math
 import random
 import numpy as np
 from scipy.stats import beta
+from albumentations.core.transforms_interface import DualTransform, ImageOnlyTransform, NoOp, to_tuple
 
 class GridMask(DualTransform):
     """GridMask augmentation for image classification and object detection.
@@ -86,7 +87,7 @@ class GridMask(DualTransform):
         
         mask = F.rotate(mask, angle) if self.rotate[1] > 0 else mask
         
-        if (image.shape[2]==3) & (image.shape[2]==1): #channel last 
+        if (image.shape[2]==3) | (image.shape[2]==1): #channel last 
             h, w = image.shape[:2]         
             mask = mask[:, :, np.newaxis]
             image *= mask[rand_h:rand_h+h, rand_w:rand_w+w].astype(image.dtype)
@@ -105,7 +106,7 @@ class GridMask(DualTransform):
 
     def get_params_dependent_on_targets(self, params):
         img = params['image']
-        if (img.shape[2]==3) & (img.shape[2]==1): #channel last 
+        if (img.shape[2]==3) | (img.shape[2]==1): #channel last 
             height, width = img.shape[:2]
                                 
         else: # channel first
@@ -130,22 +131,7 @@ class GridMask(DualTransform):
     
 ################## vinyl shinning ##########################
 
-
-
-def vinyl_shining(no_of_shadows=1, **params):
-    image_HLS = cv2.cvtColor(image, cv2.COLOR_RGB2HSV) ## Conversion to HLS
-    mask = np.zeros_like(image, np.uint8)
-    imshape = image.shape
-    vertices_list= generate_shadow_coordinates(imshape, no_of_shadows) #3 getting list of shadow vertices
-    for vertices in vertices_list:
-        mask = cv2.fillPoly(mask, vertices, (255, 255,255)) ## adding all shadow polygons on empty mask, single 255 denotes only red channel
-        image_HLS[:,:,2][mask[:,:,1]==255] = image_HLS[:,:,2][mask[:,:,1]==255] =220 ## if red channel is hot, image's "Lightness" channel's brightness is lowered
-        image_HLS[:,:,1][mask[:,:,1]==255] = image_HLS[:,:,1][mask[:,:,1]==255] * 0.7
-        #         image[mask[:,:,1]==255] = 255
-        image_RGB = cv2.cvtColor(image_HLS,cv2.COLOR_HSV2RGB) ## Conversion to RGB
-    return image_RGB
-    
-    
+   
 class VinylShining(ImageOnlyTransform):
 
     def __init__(self, n_shinnings, always_apply=False, p=0.5):
@@ -153,29 +139,32 @@ class VinylShining(ImageOnlyTransform):
         self.n_shinnings = n_shinnings
 
     def apply(self, image, vertices_list, **params):
-        image_HLS = cv2.cvtColor(image, cv2.COLOR_RGB2HSV) ## Conversion to HLS
-        mask = np.zeros_like(image, np.uint8)
-
+        image_HSV = cv2.cvtColor(image, cv2.COLOR_RGB2HSV) ## Conversion to HSV
+#         mask = np.zeros_like(image, np.uint8)
+        mask = np.zeros((image.shape), dtype=np.uint8)
+        
         for vertices in vertices_list:
             mask = cv2.fillPoly(mask, vertices, (255, 255,255)) ## adding all shadow polygons on empty mask, single 255 denotes only red channel
-            image_HLS[:,:,2][mask[:,:,1]==255] = image_HLS[:,:,2][mask[:,:,1]==255] =220 ## if red channel is hot, image's "Lightness" channel's brightness is lowered
-            image_HLS[:,:,1][mask[:,:,1]==255] = image_HLS[:,:,1][mask[:,:,1]==255] * 0.7
-            image_RGB = cv2.cvtColor(image_HLS,cv2.COLOR_HSV2RGB)
+            image_HSV[:,:,2][mask[:,:,1]==255] = image_HSV[:,:,2][mask[:,:,1]==255] =220 ## if red channel is hot, image's "Lightness" channel's brightness is lowered
+            image_HSV[:,:,1][mask[:,:,1]==255] = image_HSV[:,:,1][mask[:,:,1]==255] * 0.9
+            image_RGB = cv2.cvtColor(image_HSV,cv2.COLOR_HSV2RGB)
         return image_RGB
 
     def get_params_dependent_on_targets(self, params):
         image = params["image"]
-        vertices_list = generate_coordinates(image.shape)
-        
-        return {"vertices_list": vertices_list}
+#         if (image.shape[0]==3) or (image.shape[0]==1): # channel first
+#             image = np.transpose(image, (1,2,0))
+         
+        vertices_list = self.generate_coordinates(image.shape)
+        return { "vertices_list": vertices_list}
     
     
-    def generate_coordinates(imshape,):
+    def generate_coordinates(self, imshape):
         vertices_list=[]    
         for index in range(self.n_shinnings):        
             vertex=[]        
             for dimensions in range(np.random.randint(3,7)): ## Dimensionality of the shadow polygon            
-                vertex.append(( imshape[1]*np.random.uniform(),imshape[0]//3+imshape[0]*np.random.uniform()))        
+                vertex.append(( imshape[1]*np.random.uniform(),imshape[0]*np.random.uniform()))        
                 vertices = np.array([vertex], dtype=np.int32) ## single shadow vertices         
                 vertices_list.append(vertices)    
         return vertices_list ## List of shadow vertices
