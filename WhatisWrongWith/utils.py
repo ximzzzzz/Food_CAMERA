@@ -174,7 +174,9 @@ class CustomDataset_jamo(Dataset):
         img_path, label_top, label_mid, label_bot = self.dataset[idx]
         image = Image.open(img_path).convert('RGB')
 
+        
         img_arr = np.asarray(image)
+
         h, w, c = img_arr.shape
         if h > w:
             img_path, label_top, label_mid, label_bot = self.dataset[idx-1]
@@ -183,13 +185,15 @@ class CustomDataset_jamo(Dataset):
         orig_H = img_arr.shape[0]
         orig_W = img_arr.shape[1]
         ratio = orig_W / float(orig_H)
-        
+#         print(f'original Width : {orig_W}, original Height : {orig_H}, ratio : {ratio}')
         if math.ceil(self.resize_H * ratio) > self.resize_W:
+#             print(f' expected width : {self.resize_H * ratio}, but replaced with {self.resize_W}')
             resize_W = self.resize_W
         else :
             resize_W = math.ceil(self.resize_H * ratio)
         
         image = np.array(image.resize((resize_W, self.resize_H), Image.BICUBIC))
+    
         image = self.normalize_pad(image)
         image = tensor2im(image)
         
@@ -390,244 +394,6 @@ class AlignCollate(object):
         
         return image_tensors, labels
     
-    
-def validation(model, criterion, evaluation_loader, converter, opt):
-    """ validation or evaluation """
-    n_correct = 0
-    norm_ED = 0
-    length_of_data = 0
-    infer_time = 0
-    valid_loss_avg = Averager()
-
-    for i, (image_tensors, labels) in enumerate(evaluation_loader):
-        batch_size = image_tensors.size(0)
-        length_of_data = length_of_data + batch_size
-        image = image_tensors.to(device)
-
-        length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
-#         text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(device)
-        text_for_pred = torch.FloatTensor(batch_size, opt.batch_max_length +1, len(opt.character)+2)
-
-        text_for_loss, length_for_loss = converter.encode(labels, batch_max_length=opt.batch_max_length)
-        
-        onehot = torch.FloatTensor(batch_size, opt.batch_max_length+2, len(opt.character)+2).zero_().to(device)
-        text_for_loss = onehot.scatter(dim = 2, index = text_for_loss.unsqueeze(2).to(device), value = 1 ) #(bs, batch_max_length, num_characters)
-        
-        start_time = time.time()
-        
-#         if 'CTC' in opt.Prediction:
-#             preds = model(image, text_for_pred)
-#             forward_time = time.time() - start_time
-
-#             # Calculate evaluation loss for CTC deocder.
-#             preds_size = torch.IntTensor([preds.size(1)] * batch_size)
-#             # permute 'preds' to use CTCloss format
-#             cost = criterion(preds.log_softmax(2).permute(1, 0, 2), text_for_loss, preds_size, length_for_loss)
-
-#             # Select max probabilty (greedy decoding) then decode index to character
-#             _, preds_index = preds.max(2)
-#             preds_index = preds_index.view(-1)
-#             preds_str = converter.decode(preds_index.data, preds_size.data)
-
-        preds = model(image, text_for_pred, is_train=False)
-        forward_time = time.time() - start_time
-
-        preds = preds[:, :text_for_loss.shape[1] - 1, :]
-        target = text_for_loss[:, 1:]  # without [GO] Symbol
-#         cost = criterion(preds.contiguous().view(-1, preds.shape[-1]), target.contiguous().view(-1))
-        cost = criterion(preds.contiguous().view(-1, preds.shape[-1]), target.contiguous().view(-1, target.shape[-1]))
-
-        # select max probabilty (greedy decoding) then decode index to character
-        _, preds_index = preds.max(2)
-        preds_str = converter.decode(preds_index, length_for_pred)
-#         labels = converter.decode(text_for_loss[:, 1:], length_for_loss)
-        labels = converter.decode(text_for_loss[:, 1:].max(2)[1], length_for_loss)
-
-        infer_time += forward_time
-        valid_loss_avg.add(cost)
-
-        # calculate accuracy & confidence score
-        preds_prob = F.softmax(preds, dim=2)
-        preds_max_prob, _ = preds_prob.max(dim=2)
-        confidence_score_list = []
-        for gt, pred, pred_max_prob in zip(labels, preds_str, preds_max_prob):
-#             if 'f' in opt.Prediction:
-            gt = gt[:gt.find('[s]')]
-            pred_EOS = pred.find('[s]')
-            pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
-            pred_max_prob = pred_max_prob[:pred_EOS]
-
-            # To evaluate 'case sensitive model' with alphanumeric and case insensitve setting.
-#             if opt.sensitive and opt.data_filtering_off:
-#                 pred = pred.lower()
-#                 gt = gt.lower()
-#                 alphanumeric_case_insensitve = '0123456789abcdefghijklmnopqrstuvwxyz'
-#                 out_of_alphanumeric_case_insensitve = f'[^{alphanumeric_case_insensitve}]'
-#                 pred = re.sub(out_of_alphanumeric_case_insensitve, '', pred)
-#                 gt = re.sub(out_of_alphanumeric_case_insensitve, '', gt)
-
-            if pred == gt:
-                n_correct += 1
-
-            '''
-            (old version) ICDAR2017 DOST Normalized Edit Distance https://rrc.cvc.uab.es/?ch=7&com=tasks
-            "For each word we calculate the normalized edit distance to the length of the ground truth transcription."
-            if len(gt) == 0:
-                norm_ED += 1
-            else:
-                norm_ED += edit_distance(pred, gt) / len(gt)
-            '''
-
-            # ICDAR2019 Normalized Edit Distance
-            if len(gt) == 0 or len(pred) == 0:
-                norm_ED += 0
-            elif len(gt) > len(pred):
-                norm_ED += 1 - edit_distance(pred, gt) / len(gt)
-            else:
-                norm_ED += 1 - edit_distance(pred, gt) / len(pred)
-
-            # calculate confidence score (= multiply of pred_max_prob)
-            try:
-                confidence_score = pred_max_prob.cumprod(dim=0)[-1]
-            except:
-                confidence_score = 0  # for empty pred case, when prune after "end of sentence" token ([s])
-            confidence_score_list.append(confidence_score)
-            # print(pred, gt, pred==gt, confidence_score)
-
-    accuracy = n_correct / float(length_of_data) * 100
-    norm_ED = norm_ED / float(length_of_data)  # ICDAR2019 Normalized Edit Distance
-
-    return valid_loss_avg.val(), accuracy, norm_ED, preds_str, confidence_score_list, labels, infer_time, length_of_data
-
-
-
-def validation_jamo(model, criterion, evaluation_loader, top_converter, middle_converter, bottom_converter, opt):
-    """ validation or evaluation """
-    n_correct = 0
-    norm_ED = 0
-    length_of_data = 0
-    infer_time = 0
-    valid_loss_avg = Averager()
-
-    for i, (image_tensors, top, mid, bot) in enumerate(evaluation_loader):
-        batch_size = image_tensors.size(0)
-        length_of_data = length_of_data + batch_size
-        image = image_tensors.to(device)
-
-        length_for_pred_top = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
-        text_for_pred_top = torch.FloatTensor(batch_size, opt.batch_max_length +1, opt.top_n_cls+2)
-        text_for_loss_top, length_for_loss_top = top_converter.encode(top, batch_max_length=opt.batch_max_length)
-        
-        length_for_pred_mid = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
-        text_for_pred_mid = torch.FloatTensor(batch_size, opt.batch_max_length +1, opt.middle_n_cls+2)
-        text_for_loss_mid, length_for_loss_mid = middle_converter.encode(mid, batch_max_length=opt.batch_max_length)
-        
-        length_for_pred_bot = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
-        text_for_pred_bot = torch.FloatTensor(batch_size, opt.batch_max_length +1, opt.bottom_n_cls+2)
-        text_for_loss_bot, length_for_loss_bot = bottom_converter.encode(bot, batch_max_length=opt.batch_max_length)
-        
-#         onehot = torch.FloatTensor(batch_size, opt.batch_max_length+2, len(opt.top_n_cls)+2).zero_().to(device)
-#         text_for_loss = onehot.scatter(dim = 2, index = text_for_loss_top.unsqueeze(2).to(device), value=1) #(bs, batch_max_length, num_characters)
-        
-        start_time = time.time()
-
-        pred_top, pred_mid, pred_bot = model(image, text_for_pred_top, text_for_pred_mid, text_for_pred_bot, is_train=False)
-        forward_time = time.time() - start_time
-
-        pred_top = pred_top[:, :text_for_loss_top.shape[1] -1, :]
-        pred_mid = pred_mid[:, :text_for_loss_mid.shape[1] -1, :]
-        pred_bot = pred_bot[:, :text_for_loss_bot.shape[1] -1, :]
-        target_top = text_for_loss_top[:, 1:]  # without [GO] Symbol
-        target_mid = text_for_loss_mid[:, 1:] 
-        target_bot = text_for_loss_bot[:, 1:]
-#         cost = criterion(preds.contiguous().view(-1, preds.shape[-1]), target.contiguous().view(-1))
-        cost_top = criterion(pred_top.contiguous().view(-1, pred_top.shape[-1]), target_top.contiguous().view(-1))
-        cost_mid = criterion(pred_mid.contiguous().view(-1, pred_mid.shape[-1]), target_mid.contiguous().view(-1))
-        cost_bot = criterion(pred_bot.contiguous().view(-1, pred_bot.shape[-1]), target_bot.contiguous().view(-1))
-        
-        cost = cost_top + cost_mid + cost_bot
-
-        # select max probabilty (greedy decoding) then decode index to character
-        _, pred_top_index = pred_top.max(2)
-        _, pred_mid_index = pred_mid.max(2)
-        _, pred_bot_index = pred_bot.max(2)
-        
-        pred_top_str = top_converter.decode(pred_top_index, length_for_pred_top)
-        pred_mid_str = middle_converter.decode(pred_mid_index, length_for_pred_mid)
-        pred_bot_str = bottom_converter.decode(pred_bot_index, length_for_pred_bot)
-        
-        label_top = top_converter.decode(text_for_loss_top[:, 1:], length_for_loss_top)
-        label_mid = middle_converter.decode(text_for_loss_mid[:, 1:], length_for_loss_mid)
-        label_bot = bottom_converter.decode(text_for_loss_bot[:, 1:], length_for_loss_bot)
-        
-#         labels = converter.decode(text_for_loss[:, 1:].max(2)[1], length_for_loss)
-
-        infer_time += forward_time
-        valid_loss_avg.add(cost)
-
-        # calculate accuracy & confidence score
-#         preds_prob_top = F.softmax(pred_top, dim=2)
-        
-#         preds_max_prob, _ = preds_prob.max(dim=2)
-#         confidence_score_list = []
-        for gt_top, gt_mid, gt_bot, pred_top_, pred_mid_, pred_bot_ in zip(label_top, label_mid, label_bot, pred_top_str, pred_mid_str, pred_bot_str):
-
-            gt_top = gt_top[:gt_top.find('[s]')]
-            gt_mid = gt_mid[:gt_mid.find('[s]')]
-            gt_bot = gt_bot[:gt_bot.find('[s]')]
-            
-            pred_top_ = pred_top_[:pred_top_.find('[s]')]  # prune after "end of sentence" token ([s])
-            pred_mid_ = pred_mid_[:pred_mid_.find('[s]')]
-            pred_bot_ = pred_bot_[:pred_bot_.find('[s]')]
-#             pred_max_prob = pred_max_prob[:pred_EOS]
-
-            # To evaluate 'case sensitive model' with alphanumeric and case insensitve setting.
-#             if opt.sensitive and opt.data_filtering_off:
-#                 pred = pred.lower()
-#                 gt = gt.lower()
-#                 alphanumeric_case_insensitve = '0123456789abcdefghijklmnopqrstuvwxyz'
-#                 out_of_alphanumeric_case_insensitve = f'[^{alphanumeric_case_insensitve}]'
-#                 pred = re.sub(out_of_alphanumeric_case_insensitve, '', pred)
-#                 gt = re.sub(out_of_alphanumeric_case_insensitve, '', gt)
-            
-            
-            '''
-            (old version) ICDAR2017 DOST Normalized Edit Distance https://rrc.cvc.uab.es/?ch=7&com=tasks
-            "For each word we calculate the normalized edit distance to the length of the ground truth transcription."
-            if len(gt) == 0:
-                norm_ED += 1
-            else:
-                norm_ED += edit_distance(pred, gt) / len(gt)
-            '''
-            
-            for gt, pred in zip([gt_top, gt_mid, gt_bot], [pred_top_, pred_mid_, pred_bot_]):
-                #str_maker로 합친 후  gt와 비교
-#                 print(f' gt {gt}')
-#                 print(f' pred {pred}')
-                if gt==pred:
-                    n_correct +=1
-                
-                # ICDAR2019 Normalized Edit Distance
-                if len(gt) == 0 or len(pred) == 0:
-                    norm_ED += 0
-                elif len(gt) > len(pred):
-                    norm_ED += 1 - edit_distance(pred, gt) / len(gt)
-                else:
-                    norm_ED += 1 - edit_distance(pred, gt) / len(pred)
-
-#             # calculate confidence score (= multiply of pred_max_prob)
-#             try:
-#                 confidence_score = pred_max_prob.cumprod(dim=0)[-1]
-#             except:
-#                 confidence_score = 0  # for empty pred case, when prune after "end of sentence" token ([s])
-#             confidence_score_list.append(confidence_score)
-            # print(pred, gt, pred==gt, confidence_score)
-
-    accuracy = (n_correct/3) / float(length_of_data) * 100
-    norm_ED = norm_ED / float(length_of_data)  # ICDAR2019 Normalized Edit Distance
-
-    return valid_loss_avg.val(), accuracy, norm_ED, pred_top_str, pred_mid_str, pred_bot_str, label_top, label_mid, label_bot, infer_time, length_of_data
-
 
 ####################################################
 ###############kaniblu/hangul-utils#################
