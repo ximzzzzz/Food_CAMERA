@@ -33,7 +33,8 @@ class ArcMarginProduct(nn.Module):
 
     def forward(self, input, label):
         # --------------------------- cos(theta) & phi(theta) ---------------------------
-        cosine = F.linear(F.normalize(input, dim=2), F.normalize(self.weight))
+#         cosine = F.linear(F.normalize(input, dim=2), F.normalize(self.weight))
+        cosine = F.linear(input, F.normalize(self.weight))
 #         print('weight', self.weight)
 #         print('cosine', cosine)
         sine = torch.sqrt((1.0 - torch.pow(cosine, 2)).clamp(0, 1))
@@ -52,6 +53,7 @@ class ArcMarginProduct(nn.Module):
         output = (one_hot * phi) + ((1.0 - one_hot) * cosine)  # you can use torch.where if your torch.__version__ is 0.4
 #         print('output phi*cosine', output) 
         output *= self.s
+        output = F.softmax(output, dim=-1)
         # print(output)
 
         return output
