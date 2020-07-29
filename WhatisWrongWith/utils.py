@@ -26,6 +26,14 @@ from nltk.metrics.distance import edit_distance
 device = torch.device('cuda')
 # device = torch.device('cpu')
 
+def reduced_focal_loss(pred, target, ignore_index, alpha, gamma, threshold):
+    ce_loss = torch.nn.functional.cross_entropy(pred, target, ignore_index=0, reduction='none')
+    pt = torch.exp(-ce_loss)
+    pt_scaled = ((1-pt)**2)/(0.5**2)
+    fr = torch.where(pt < 0.5, torch.ones_like(pt).to(device), pt_scaled)
+    return (fr*ce_loss).mean()
+
+
 def str_combine(decode_top, decode_mid, decode_bot):
         
     decode_top = decode_top[:decode_top.find('[s]')]
