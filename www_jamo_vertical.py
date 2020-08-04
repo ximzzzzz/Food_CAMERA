@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import easydict
 import sys
+import pickle
 sys.path.append('./Whatiswrong')
 sys.path.append('./Scatter')
 
@@ -47,7 +48,7 @@ from torchcontrib.optim import SWA
 import importlib
 importlib.reload(ko_dataset)
 importlib.reload(en_dataset)
-importlib.reload(www_model_jamo_vertical)
+importlib.reload(utils)
 
 
 # In[3]:
@@ -61,13 +62,13 @@ importlib.reload(www_model_jamo_vertical)
 
 # ### arguements
 
-# In[9]:
+# In[2]:
 
 
 # opt
 opt = easydict.EasyDict({
     "experiment_name" : f'{utils.SaveDir_maker(base_model = "www_jamo_vertical", base_model_dir = "./models")}',
-    'saved_model' : 'www_jamo_vertical_0729/2/best_accuracy_96.51.pth',
+    'saved_model' : '',
     "manualSeed" : 1111,
     "imgH" : 35 ,
     "imgW" :  250,
@@ -77,7 +78,7 @@ opt = easydict.EasyDict({
     'workers' : 20,
     'rgb' :True,
     'sensitive' : True,
-    'top_char' : ' !"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~01234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎㄲㄸㅃㅆㅉ',
+    'top_char' : ' !"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎㄲㄸㅃㅆㅉ',
     'middle_char' : ' ㅏㅑㅓㅕㅗㅛㅜㅠㅡㅣㅐㅒㅔㅖㅘㅙㅚㅝㅞㅟㅢ',
     'bottom_char' : ' ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎㄲㄸㅃㅆㅉㄳㄵㄶㄺㄻㄼㄽㄾㄿㅀㅄ',
     'batch_max_length' : 25,
@@ -89,12 +90,12 @@ opt = easydict.EasyDict({
     'rho' : 0.95,
     'eps' : 1e-8,
     'grad_clip' : 5,
-    'valInterval' : 2000,
+    'valInterval' : 5000,
     'num_epoch' : 100,
     'input_channel' : 3,
     'FT' : True,
-#     'extract' : 'RCNN',
-    'extract' : 'efficientnet-b3',
+    # 'extract' : 'RCNN',
+    'extract' : 'efficientnet-b5',
     'pred' : ' '
     })
 
@@ -106,117 +107,19 @@ opt.middle_n_cls = len(middle_converter.character)
 opt.bottom_n_cls = len(bottom_converter.character)
 device = torch.device('cuda') #utils.py 안에 device는 따로 세팅해줘야함
 
-def reduced_focal_loss(pred, target, ignore_index, alpha, gamma, threshold):
-    ce_loss = nn.functional.cross_entropy(pred, target, ignore_index=0, reduction='none')
-    pt = torch.exp(-ce_loss)
-    pt_scaled = ((1-pt)**2)/(0.5**2)
-    fr = torch.where(pt < 0.5, torch.ones_like(pt).to(device), pt_scaled)
-    return (fr*ce_loss).mean()
-
-def ohem_loss( rate, cls_pred, cls_target ):
-    batch_size = cls_pred.size(0) 
-    ohem_cls_loss = F.cross_entropy(cls_pred, cls_target, reduction='none', ignore_index=-1)
-
-    sorted_ohem_loss, idx = torch.sort(ohem_cls_loss, descending=True)
-    keep_num = min(sorted_ohem_loss.size()[0], int(batch_size*rate) )
-    if keep_num < sorted_ohem_loss.size()[0]:
-        keep_idx_cuda = idx[:keep_num]
-        ohem_cls_loss = ohem_cls_loss[keep_idx_cuda]
-    cls_loss = ohem_cls_loss.sum() / keep_num
-    return cls_loss
-
-
-# --------
-
-# In[3]:
-
-
-# model = www_model_jamo_vertical.STR(opt, device)
-# model.load_state_dict(torch.load('/Data/FoodDetection/AI_OCR/models/www_jamo_vertical_0729/0/best_accuracy.pth'))
-# model = torch.nn.DataParallel(model).to(device)
-# model.train()
-# print('train mode')
-
-
-# In[8]:
-
-
-# iterer = iter(data_loader)
-
-
-# In[9]:
-
-
-# img, top, mid, bot  = next(iterer)
-# img = img.to(device)
-# top_enc, top_length = top_converter.encode(top, opt.batch_max_length)
-# mid_enc, mid_length = middle_converter.encode(mid, opt.batch_max_length)
-# bot_enc, bot_length = bottom_converter.encode(bot, opt.batch_max_length)
-# output = model(img, top_enc, mid_enc, bot_enc )
-
-
-# In[7]:
-
-
-# model.Extract = new_model.Extract
-# os.makedirs('/Data/FoodDetection/AI_OCR/models/www_jamo_vertical_0727/0',exist_ok=True)
-# torch.save(model.state_dict(), '/Data/FoodDetection/AI_OCR/models/www_jamo_vertical_0727/0/init_model.pth')
-
-
-# ----------
-
-# ### dataset
-
-# In[ ]:
-
-
-# KOREAN
-data=[]
-ko_hand = ko_dataset.hand_dataset( dataset_mode = 'word', label_mode = 'jamo') 
-ko_public = ko_dataset.public_crop(mode = 'jamo') 
-ko_synthetic = ko_dataset.korean_synthetic(need_samples = 2500000, mode='jamo')
-ko_synthetic_long = ko_dataset.korean_synthetic_long(mode='jamo')
-
-# ENGLISH 
-eng_dataset = en_dataset.get_english_dataset(mode='jamo')
-eng_synthetic = en_dataset.en_synthetic(mode='jamo', need_samples= 3500000) #0 for all
-
-
-# In[ ]:
-
 
 with open('./dataset', 'rb') as file:
     data = pickle.load(file)
 
 
-# In[11]:
-
-
-""" Seed setting """
-# print("Random Seed: ", opt.manualSeed)
-random.seed(opt.manualSeed)
-np.random.seed(opt.manualSeed)
-torch.manual_seed(opt.manualSeed)
-torch.cuda.manual_seed(opt.manualSeed)
-
-data.extend(ko_hand.dataset)
-data.extend(ko_public.dataset)
-data.extend(ko_synthetic.dataset)
-data.extend(ko_synthetic_long.dataset)
-data.extend(eng_dataset)
-data.extend(eng_synthetic.dataset)
-random.shuffle(data)
-print('Total number of data : ', len(data))
-
-
-# In[12]:
+# In[4]:
 
 
 transformers = Compose([
                         OneOf([
 #                                   augs.VinylShining(1),
                             augs.GridMask(num_grid=(10,20)),
-                            augs.RandomAugMix(severity=3, width=3)], p =0.7),
+                            augs.RandomAugMix(severity=2, width=2)], p =0.7),
                             ToTensor()
                        ])
 train_custom = utils.CustomDataset_jamo(data[ : int(len(data) * 0.98)], resize_shape = (opt.imgH, opt.imgW), transformer=transformers)
@@ -228,12 +131,21 @@ valid_loader = DataLoader(valid_custom, batch_size = opt.batch_size,  num_worker
 
 # ## train
 
-# In[7]:
+
+with open('top_per_cls', 'rb') as file:
+    top_per_cls = pickle.load(file)
+with open('mid_per_cls', 'rb') as file:
+    mid_per_cls = pickle.load(file)
+with open('bot_per_cls', 'rb') as file:
+    bot_per_cls = pickle.load(file)
+
+
+# In[8]:
 
 
 def train(opt):
     model = www_model_jamo_vertical.STR(opt, device)
-    print('model parameters. height {}, width {}, num of fiducial {}, input channel {}, output channel {}, hidden size {},     batch max length {}, save path {}'.format(opt.imgH, opt.imgW, opt.num_fiducial, opt.input_channel, opt.output_channel, opt.hidden_size, opt.batch_max_length, opt.experiment_name))
+    print('model parameters. height {}, width {}, num of fiducial {}, input channel {}, output channel {}, hidden size {},     batch max length {}'.format(opt.imgH, opt.imgW, opt.num_fiducial, opt.input_channel, opt.output_channel, opt.hidden_size, opt.batch_max_length))
     
     # weight initialization
     for name, param, in model.named_parameters():
@@ -281,8 +193,8 @@ def train(opt):
     
     # optimizer
     
-    base_opt = optim.Adadelta(filtered_parameters, lr= opt.lr, rho = opt.rho, eps = opt.eps)
-#     base_opt = torch.optim.Adam(filtered_parameters, lr=0.001)
+#     base_opt = optim.Adadelta(filtered_parameters, lr= opt.lr, rho = opt.rho, eps = opt.eps)
+    base_opt = torch.optim.Adam(filtered_parameters, lr=0.001)
     optimizer = SWA(base_opt)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', verbose=True, patience = 2, factor= 0.5 )
 #     optimizer = adabound.AdaBound(filtered_parameters, lr=1e-3, final_lr=0.1)
@@ -318,10 +230,15 @@ def train(opt):
 #             cost_top = criterion(pred_top.view(-1, pred_top.shape[-1]), text_top[:, 1:].contiguous().view(-1))
 #             cost_mid = criterion(pred_mid.view(-1, pred_mid.shape[-1]), text_mid[:, 1:].contiguous().view(-1))
 #             cost_bot = criterion(pred_bot.view(-1, pred_bot.shape[-1]), text_bot[:, 1:].contiguous().view(-1))
-            cost_top = reduced_focal_loss(pred_top.view(-1, pred_top.shape[-1]), text_top[:, 1:].contiguous().view(-1), ignore_index=0, gamma=2, alpha=0.25, threshold=0.5)
-            cost_mid = reduced_focal_loss(pred_mid.view(-1, pred_mid.shape[-1]), text_mid[:, 1:].contiguous().view(-1), ignore_index=0, gamma=2, alpha=0.25, threshold=0.5)
-            cost_bot = reduced_focal_loss(pred_bot.view(-1, pred_bot.shape[-1]), text_bot[:, 1:].contiguous().view(-1), ignore_index=0, gamma=2, alpha=0.25, threshold=0.5)
-
+            if n_iter%2==0:
+        
+                cost_top = utils.reduced_focal_loss(pred_top.view(-1, pred_top.shape[-1]), text_top[:, 1:].contiguous().view(-1), ignore_index=0, gamma=2, alpha=0.25, threshold=0.5)
+                cost_mid = utils.reduced_focal_loss(pred_mid.view(-1, pred_mid.shape[-1]), text_mid[:, 1:].contiguous().view(-1), ignore_index=0, gamma=2, alpha=0.25, threshold=0.5)
+                cost_bot = utils.reduced_focal_loss(pred_bot.view(-1, pred_bot.shape[-1]), text_bot[:, 1:].contiguous().view(-1), ignore_index=0, gamma=2, alpha=0.25, threshold=0.5)
+            else:
+                cost_top = utils.CB_loss(text_top[:, 1:].contiguous().view(-1), pred_top.view(-1, pred_top.shape[-1]), top_per_cls, opt.top_n_cls, 'focal', 0.999, 0.5)
+                cost_mid = utils.CB_loss(text_mid[:, 1:].contiguous().view(-1), pred_mid.view(-1, pred_mid.shape[-1]), mid_per_cls, opt.middle_n_cls, 'focal', 0.999, 0.5)
+                cost_bot = utils.CB_loss(text_bot[:, 1:].contiguous().view(-1), pred_bot.view(-1, pred_bot.shape[-1]), bot_per_cls, opt.bottom_n_cls, 'focal', 0.999, 0.5)
             cost = cost_top*0.33 + cost_mid *0.33 + cost_bot*0.33
     
             loss_avg = utils.Averager()
@@ -331,6 +248,7 @@ def train(opt):
             cost.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), opt.grad_clip) #gradient clipping with 5
             optimizer.step()
+            print(loss_avg.val())
 
             #validation
             if (n_iter % opt.valInterval == 0) & (n_iter!=0) :
@@ -384,7 +302,7 @@ def train(opt):
                 # Stochastic weight averaging
                 optimizer.update_swa()
                 swa_count+=1
-                if swa_count % 3 ==0:
+                if swa_count % 5 ==0:
                     optimizer.swap_swa_sgd()
                     torch.save(model.module.state_dict(), f'./models/{opt.experiment_name}/swa_{swa_count}.pth')
 
