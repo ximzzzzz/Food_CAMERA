@@ -137,8 +137,6 @@ class GridMask(DualTransform):
     
     
 ################## vinyl shinning ##########################
-
-   
 class VinylShining(ImageOnlyTransform):
 
     def __init__(self, n_shinnings, always_apply=False, p=0.5):
@@ -149,12 +147,19 @@ class VinylShining(ImageOnlyTransform):
         image_HSV = cv2.cvtColor(image, cv2.COLOR_RGB2HSV) ## Conversion to HSV
 #         mask = np.zeros_like(image, np.uint8)
         mask = np.zeros((image.shape), dtype=np.uint8)
-        
-        for vertices in vertices_list:
+#         print('satuation max value  : ' , image[:,:,1].max())
+        for vertices in vertices_list[:]:
             mask = cv2.fillPoly(mask, vertices, (255, 255,255)) ## adding all shadow polygons on empty mask, single 255 denotes only red channel
-            image_HSV[:,:,2][mask[:,:,1]==255] = image_HSV[:,:,2][mask[:,:,1]==255] =220 ## if red channel is hot, image's "Lightness" channel's brightness is lowered
-            image_HSV[:,:,1][mask[:,:,1]==255] = image_HSV[:,:,1][mask[:,:,1]==255] * 0.9
-            image_RGB = cv2.cvtColor(image_HSV,cv2.COLOR_HSV2RGB)
+        
+        values = image_HSV[:,:,2][mask[:,:,1]==255] * 1.5 # value, higher, brighter
+        values = [255 if x > 255 else x for x in values] # max clipping
+        sat = image_HSV[:,:,1][mask[:,:,1]==255] * 0.2  # saturation, lower, whiter
+
+        # Saturation, Value all of these has max value  = 255
+        image_HSV[:,:,2][mask[:,:,1]==255] = values ## if red channel is hot, image's "Lightness" channel's brightness is lowered
+        image_HSV[:,:,1][mask[:,:,1]==255] = sat 
+        image_RGB = cv2.cvtColor(image_HSV,cv2.COLOR_HSV2RGB)
+
         return image_RGB
 
     def get_params_dependent_on_targets(self, params):
@@ -183,6 +188,51 @@ class VinylShining(ImageOnlyTransform):
 
     def get_transform_init_args_names(self):
         return ("var_limit",)
+   
+# class VinylShining(ImageOnlyTransform):
+
+#     def __init__(self, n_shinnings, always_apply=False, p=0.5):
+#         super(VinylShining, self).__init__(always_apply, p)
+#         self.n_shinnings = n_shinnings
+
+#     def apply(self, image, vertices_list, **params):
+#         image_HSV = cv2.cvtColor(image, cv2.COLOR_RGB2HSV) ## Conversion to HSV
+# #         mask = np.zeros_like(image, np.uint8)
+#         mask = np.zeros((image.shape), dtype=np.uint8)
+        
+#         for vertices in vertices_list:
+#             mask = cv2.fillPoly(mask, vertices, (255, 255,255)) ## adding all shadow polygons on empty mask, single 255 denotes only red channel
+#             image_HSV[:,:,2][mask[:,:,1]==255] = image_HSV[:,:,2][mask[:,:,1]==255] =220 ## if red channel is hot, image's "Lightness" channel's brightness is lowered
+#             image_HSV[:,:,1][mask[:,:,1]==255] = image_HSV[:,:,1][mask[:,:,1]==255] * 0.9
+#             image_RGB = cv2.cvtColor(image_HSV,cv2.COLOR_HSV2RGB)
+#         return image_RGB
+
+#     def get_params_dependent_on_targets(self, params):
+#         image = params["image"]
+# #         if (image.shape[0]==3) or (image.shape[0]==1): # channel first
+# #             image = np.transpose(image, (1,2,0))
+         
+#         vertices_list = self.generate_coordinates(image.shape)
+#         return { "vertices_list": vertices_list}
+    
+    
+#     def generate_coordinates(self, imshape):
+#         vertices_list=[]    
+#         for index in range(self.n_shinnings):        
+#             vertex=[]        
+#             for dimensions in range(np.random.randint(3,7)): ## Dimensionality of the shadow polygon            
+#                 vertex.append(( imshape[1]*np.random.uniform(),imshape[0]*np.random.uniform()))        
+#                 vertices = np.array([vertex], dtype=np.int32) ## single shadow vertices         
+#                 vertices_list.append(vertices)    
+#         return vertices_list ## List of shadow vertices
+    
+    
+#     @property
+#     def targets_as_params(self):
+#         return ["image"]
+
+#     def get_transform_init_args_names(self):
+#         return ("var_limit",)
 
 
 ######################## Fmix################################
