@@ -19,7 +19,6 @@ class PositionAttnModule(nn.Module):
         
         for i in range(num_steps):
             position_embedded = self.position_embedding_layer(torch.LongTensor(self.opt.batch_size).fill_(i).to(self.device))
-
             a = torch.softmax(torch.bmm(batch_h, position_embedded.unsqueeze(2)), 1)
             context = torch.bmm(a.permute(0,2,1), batch_h)
             output_hiddens[:, i, :] = context.squeeze(1)
@@ -115,7 +114,8 @@ class AttentionCell(nn.Module):
         prev_hidden_proj = self.h2h(prev_hidden[0]).unsqueeze(1)
         e = self.score(torch.tanh(batch_H_proj + prev_hidden_proj)) 
 
-        alpha = torch.sigmoid(e)
+#         alpha = torch.sigmoid(e)
+        alpha = torch.softmax(e, dim=1)
         context = torch.bmm(alpha.permute(0, 2, 1), batch_H).squeeze(1)
         
         concat_context = torch.cat([context, char_onehots], 1)
@@ -196,7 +196,8 @@ class AttentionCell_mid(nn.Module):
         prev_hidden_proj = self.h2h(prev_hidden[0]).unsqueeze(1)
         e = self.score(torch.tanh(batch_H_proj + prev_hidden_proj)) 
         
-        alpha = torch.sigmoid(e)
+#         alpha = torch.sigmoid(e)
+        alpha = torch.softmax(e, dim=1)
         context = torch.bmm(alpha.permute(0, 2, 1), batch_H).squeeze(1)
 
         concat_context = torch.cat([context, char_onehots_mid, char_onehots_bot ], 1)
@@ -283,7 +284,8 @@ class AttentionCell_top(nn.Module):
         prev_hidden_proj = self.h2h(prev_hidden[0]).unsqueeze(1)
         e = self.score(torch.tanh(batch_H_proj + prev_hidden_proj)) 
         
-        alpha = torch.sigmoid(e)
+#         alpha = torch.sigmoid(e)
+        alpha = torch.softmax(e, dim=1)
         context = torch.bmm(alpha.permute(0, 2, 1), batch_H).squeeze(1)
 
         concat_context = torch.cat([context, char_onehots_top, char_onehots_mid, char_onehots_bot ], 1)
