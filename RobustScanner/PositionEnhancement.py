@@ -7,10 +7,15 @@ class PositionAwareModule(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, lstm_layers):
         super(PositionAwareModule, self).__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, lstm_layers)
-        self.conv1 = nn.Conv2d(hidden_size, hidden_size, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(hidden_size, output_size, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(hidden_size, hidden_size, kernel_size=3, 
+                               padding=1
+                              )
+        self.conv2 = nn.Conv2d(hidden_size, output_size, kernel_size=3, 
+                               padding=1
+                              )
         
     def forward(self, features):
+        self.lstm.flatten_parameters() 
         rows = features.size(2)
         lstm_fmap = features.permute(0,2,3,1)
         lstm_row_list = []
@@ -30,13 +35,13 @@ class PositionAwareModule(nn.Module):
         
 
 class AttnModule(nn.Module):
-    def __init__(self, opt, hidden_size num_classes, device):
+    def __init__(self, opt, hidden_size, num_classes, device):
         super(AttnModule, self).__init__()
 #         self.context_refinement = nn.Linear(opt.output_channel, opt.hidden_size)
-        self.generator = nn.Linear(hidden_size, num_classes)
-        self.embedding_weight = nn.Linear(hidden_size, opt.hidden_size)
-        self.embedding_score = nn.Linear(hidden_size, 1)
-        self.position_embedding_layer = nn.Embedding(opt.batch_max_length+1, hidden_size)
+        self.generator = nn.Linear(opt.output_channel, num_classes)
+#         self.embedding_weight = nn.Linear(hidden_size, opt.output_channel)
+#         self.embedding_score = nn.Linear(hidden_size, 1)
+        self.position_embedding_layer = nn.Embedding(opt.batch_max_length+1, opt.output_channel)
         self.opt = opt
         self.device = device
         
@@ -57,7 +62,11 @@ class AttnModule(nn.Module):
 #             context = torch.bmm(position_attention.permute(0,2,1), batch_h) #
             ##########################################
     
-            context = torch.bmm(a.permute(0,2,1), origin_fmap.view(batch_size, -1, hidden_size)
+#             print('a : ', a.permute(0,2,1).shape)
+#             print('origin fmap : ', origin_fmap.shape)
+#             print('position fmap : ', position_fmap.shape)
+#             print('origin fmap view : ' , origin_fmap.view(batch_size, -1, hidden_size).shape)
+            context = torch.bmm(a.permute(0,2,1), origin_fmap.view(batch_size, -1, hidden_size))
             output_hiddens[:, i, :] = context.squeeze(1)
         g_prime = self.generator(output_hiddens)
             
@@ -71,7 +80,10 @@ class DynamicallyFusingModule(nn.Module):
         self.lin2 = nn.Linear(n_classes *2, n_classes)
     
     def forward(self, g, g_prime):
+#         print('g : ', g.shape)
+#         print('g_prime : ', g_prime.shape)
         concat = torch.cat([g, g_prime],dim=-1)
+#         print(concat.shape)
         lin1_res = self.lin1(concat)
         torch.sigmoid_(lin1_res)
         lin2_res = self.lin2(concat)
