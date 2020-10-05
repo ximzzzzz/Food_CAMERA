@@ -23,6 +23,7 @@ import torch.nn.functional as F
 from nltk.metrics.distance import edit_distance
 import re
 import pandas as pd
+import cv2
 
 device = torch.device('cuda')
 # device = torch.device('cpu')
@@ -52,7 +53,8 @@ def ClassCounter(data, position, converter):
     for cls in converter.dict.keys():
         n_cls = cls_cnt[cls_cnt['class'] == cls]['count'].values
         if len(n_cls)==0:
-            n_cls = [max_cnt]
+#             n_cls = [max_cnt]
+            n_cls = [1]
         cls_enc = converter.dict[cls]
 #         print(f'{cls} : {n_cls[0]}')
         cnt_dict[cls_enc] = n_cls[0]
@@ -61,14 +63,13 @@ def ClassCounter(data, position, converter):
 
 def reduced_focal_cbloss(labels, logits, alpha, gamma, threshold):
     
-    BCLoss = F.binary_cross_entropy_with_logits(input = logits, target = labels,reduction = "none")
+    BCLoss = F.binary_cross_entropy_with_logits(input = logits, target = labels, reduction = "none")
     p = labels*torch.sigmoid(logits)+(1-labels)*(1-torch.sigmoid(logits))
-    modulator = torch.where(p < threshold, torch.ones_like(p), ((1-p)/threshold)**gamma)
+    modulator = torch.where(p < threshold, torch.ones_like(p), ((1-p)**gamma)/(threshold**gamma))
     loss = modulator * BCLoss
 
-#     weighted_loss = alpha * loss
-    focal_loss = torch.sum(loss)
-
+    weighted_loss = alpha * loss
+    focal_loss = torch.sum(weighted_loss)
     focal_loss /= torch.sum(labels)
     return focal_loss    
 
@@ -87,7 +88,7 @@ def focal_loss(labels, logits, alpha, gamma):
     Returns:
       focal_loss: A float32 scalar representing normalized total loss.
     """    
-    BCLoss = F.binary_cross_entropy_with_logits(input = logits, target = labels,reduction = "none")
+    BCLoss = F.binary_cross_entropy_with_logits(input = logits, target = labels, reduction = "none")
 
     if gamma == 0.0:
         modulator = 1.0
@@ -134,19 +135,21 @@ def CB_loss(labels, logits, samples_per_cls, no_of_classes, loss_type, beta, gam
 
     if loss_type == "focal":
         cb_loss = focal_loss(labels_one_hot, logits, weights, gamma)
+    elif loss_type=='reduced_focal':
+        cb_loss =reduced_focal_cbloss(labels_one_hot, logits, weights, gamma, threshold)
     elif loss_type == "sigmoid":
         cb_loss = F.binary_cross_entropy_with_logits(input = logits,target = labels_one_hot, weights = weights)
     elif loss_type == "softmax":
         pred = logits.softmax(dim = 1)
         cb_loss = F.binary_cross_entropy(input = pred, target = labels_one_hot, weight = weights)
-    elif loss_type=='reduced_focal':
-        cb_loss =reduced_focal_cbloss(labels_one_hot, logits, weights, gamma, threshold)
+
     return cb_loss
 
 
 
-def reduced_focal_loss(pred, target, ignore_index, alpha, gamma, threshold):
-    ce_loss = torch.nn.functional.cross_entropy(pred, target, ignore_index=0, reduction='none')
+def reduced_focal_loss(pred, target,  alpha, gamma, threshold):
+#     ce_loss = torch.nn.functional.cross_entropy(pred, target, ignore_index=0, reduction='none')
+    ce_loss = torch.nn.functional.cross_entropy(pred, target, reduction='none')
     pt = torch.exp(-ce_loss)
     pt_scaled = ((1-pt)**2)/(0.5**2)
     fr = torch.where(pt < 0.5, torch.ones_like(pt).to(device), pt_scaled)
@@ -173,7 +176,14 @@ def str_combine(decode_top, decode_mid, decode_bot):
     combine_res = ''
     for i in range(combine_arr.shape[1]):
         char = combine_arr[:,i]
-        one_char = join_jamos(char).strip()
+        if ((char[0] in 'ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎㄲㄸㅃㅆㅉ') & (char[1]==' ')) :
+            one_char = ''
+            
+        elif ((char[0] in ' !"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ') & ((char[1]!=' ') | (char[2]!=' '))):
+            one_char = char[0]
+            
+        else :
+            one_char = join_jamos(char).strip()
         combine_res = combine_res+one_char
     return combine_res
 
@@ -247,7 +257,7 @@ class Dataset_streamer(Dataset):
                 image = Image.fromarray((new_shape*255).astype(np.uint8))
                 
             except :
-                img_path, label = self.dataset[idx+1]
+                img_path, label = self.dataset[idx-1]
                 image = Image.open(img_path).convert('RGB')
         
         # normalize with padding
@@ -281,6 +291,31 @@ def make_str(label):
         string+=lab
     return string
 
+class Dataset_albu(Dataset):
+    
+    def __init__(self, dataset, input_channel = 3, transformer=None):
+        self.dataset = dataset
+        self.transform = transformer
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        
+        img_path, label_top, label_mid, label_bot = self.dataset[idx]
+        image = cv2.imread(img_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        label_top = make_str(label_top)
+        label_mid = make_str(label_mid)
+        label_bot = make_str(label_bot)
+        
+        if self.transform:
+            image = self.transform(**{'image':image})['image']
+        
+        return (image, label_top, label_mid, label_bot)
+    
+    
 class CustomDataset_jamo(Dataset):
     
     def __init__(self, dataset, resize_shape = (32, 200), input_channel = 3, transformer=None):
@@ -324,7 +359,7 @@ class CustomDataset_jamo(Dataset):
     
         image = self.normalize_pad(image)
         image = tensor2im(image)
-        
+#         print(image.shape)
         label_top = make_str(label_top)
         label_mid = make_str(label_mid)
         label_bot = make_str(label_bot)
@@ -338,10 +373,12 @@ class CustomDataset_jamo(Dataset):
     
 class AttnLabelConverter(object):
     
-    def __init__(self, character):
+    def __init__(self, character, device):
         list_token = ['[GO]', '[s]']
         list_character = list(character)
         self.character = list_token + list_character
+        self.n_cls = len(self.character)
+        self.device = device
         
         self.dict = {}
         for i, char in enumerate(self.character):
@@ -353,15 +390,11 @@ class AttnLabelConverter(object):
         # additional +1 for [GO] at first step. batch_text is padded with [GO]  token after [s] token.
         batch_text = torch.LongTensor(len(text), batch_max_length + 1).fill_(0)
         for i, t in enumerate(text):
-#             print('t', t)
             text = list(t)
-#             print('text', text)
             text.append('[s]')
-#             print('before encoded', text) 
             text = [self.dict[char] for char in text]
-#             print('encoded' ,text)
             batch_text[i][1 : 1+len(text)] = torch.LongTensor(text)
-        return (batch_text.to(device), torch.IntTensor(length).to(device))
+        return (batch_text.to(self.device ), torch.IntTensor(length).to(self.device))
 #         return (batch_text, torch.IntTensor(length))
     
     
