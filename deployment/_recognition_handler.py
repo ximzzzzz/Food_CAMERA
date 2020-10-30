@@ -65,20 +65,22 @@ class RecognitionHandler(BaseHandler):
         _, pred_mid_index = preds[1].max(2)
         _, pred_bot_index = preds[2].max(2)
         
-        attn_converter_top = AttnLabelConverter(self.top_char, self.device)
-        attn_converter_mid = AttnLabelConverter(self.mid_char, self.device)
-        attn_converter_bot = AttnLabelConverter(self.bot_char, self.device)
+        batch_size = pred_top_index.shape[0]
         
-        decode_top = attn_converter_top.decode(pred_top_index, torch.FloatTensor(batch_size, 26, attn_converter_top.n_cls+2))
-        decode_mid = attn_converter_mid.decode(pred_mid_index, torch.FloatTensor(batch_size, 26, attn_converter_mid.n_cls+2))
-        decode_bot = attn_converter_bot.decode(pred_bot_index, torch.FloatTensor(batch_size, 26, attn_converter_bot.n_cls+2))
+#         attn_converter_top = AttnLabelConverter_top(self.top_char, self.device)
+#         attn_converter_mid = AttnLabelConverter_mid(self.mid_char, self.device)
+#         attn_converter_bot = AttnLabelConverter_bot(self.bot_char, self.device)
         
-        batch_size = len(decode_top)
-        recognition_list = []
-        for i in range(batch_size):
-            str_combined = str_combine(decode_top[i], decode_mid[i], decode_bot[i])
-            if not str_combined=='':
-                recognition_list.append(utils.str_combine(decode_top[i], decode_mid[i], decode_bot[i]))
+#         decode_top = attn_converter_top.decode(pred_top_index, torch.FloatTensor(batch_size, 26, attn_converter_top.n_cls+2))
+#         decode_mid = attn_converter_mid.decode(pred_mid_index, torch.FloatTensor(batch_size, 26, attn_converter_mid.n_cls+2))
+#         decode_bot = attn_converter_bot.decode(pred_bot_index, torch.FloatTensor(batch_size, 26, attn_converter_bot.n_cls+2))
+      
+        recognition_list = [[pred_top_index.tolist() , pred_mid_index.tolist(), pred_bot_index.tolist() ]]
+
+#         for i in range(batch_size):
+#             str_combined = str_combine(decode_top[i], decode_mid[i], decode_bot[i])
+#             if not str_combined=='':
+#                 recognition_list.append(utils.str_combine(decode_top[i], decode_mid[i], decode_bot[i]))
                 
         return recognition_list
     
@@ -103,12 +105,129 @@ class NormalizePAD(object):
         return Pad_img
 
 
-class AttnLabelConverter(object):
+class AttnLabelConverter_top(object):
     
-    def __init__(self, character, device):
+    def __init__(self, chars, device):
         list_token = ['[GO]', '[s]']
-        list_character = list(character)
-        self.character = list_token + list_character
+        list_token.extend(list(chars))
+        
+#         list_token = ['[GO]',
+#  '[s]',
+#  ' ',
+#  '!',
+#  '"',
+#  '#',
+#  '$',
+#  '%',
+#  '&',
+#  "'",
+#  '(',
+#  ')',
+#  '*',
+#  '+',
+#  ',',
+#  '-',
+#  '.',
+#  '/',
+#  ':',
+#  ';',
+#  '<',
+#  '=',
+#  '>',
+#  '?',
+#  '@',
+#  '[',
+#  '\\',
+#  ']',
+#  '^',
+#  '_',
+#  '`',
+#  '{',
+#  '|',
+#  '}',
+#  '~',
+#  '0',
+#  '1',
+#  '2',
+#  '3',
+#  '4',
+#  '5',
+#  '6',
+#  '7',
+#  '8',
+#  '9',
+#  'a',
+#  'b',
+#  'c',
+#  'd',
+#  'e',
+#  'f',
+#  'g',
+#  'h',
+#  'i',
+#  'j',
+#  'k',
+#  'l',
+#  'm',
+#  'n',
+#  'o',
+#  'p',
+#  'q',
+#  'r',
+#  's',
+#  't',
+#  'u',
+#  'v',
+#  'w',
+#  'x',
+#  'y',
+#  'z',
+#  'A',
+#  'B',
+#  'C',
+#  'D',
+#  'E',
+#  'F',
+#  'G',
+#  'H',
+#  'I',
+#  'J',
+#  'K',
+#  'L',
+#  'M',
+#  'N',
+#  'O',
+#  'P',
+#  'Q',
+#  'R',
+#  'S',
+#  'T',
+#  'U',
+#  'V',
+#  'W',
+#  'X',
+#  'Y',
+#  'Z',
+#  'ㄱ',
+#  'ㄴ',
+#  'ㄷ',
+#  'ㄹ',
+#  'ㅁ',
+#  'ㅂ',
+#  'ㅅ',
+#  'ㅇ',
+#  'ㅈ',
+#  'ㅊ',
+#  'ㅋ',
+#  'ㅌ',
+#  'ㅍ',
+#  'ㅎ',
+#  'ㄲ',
+#  'ㄸ',
+#  'ㅃ',
+#  'ㅆ',
+#  'ㅉ']
+        self.character = list_token 
         self.n_cls = len(self.character)
         self.device = device
         
@@ -133,11 +252,155 @@ class AttnLabelConverter(object):
     def decode(self, text_index, length):
         texts = []
         for index, i in enumerate(length):
-            text = ''.join([self.character[i] for i in text_index[index, :]])
-            texts.append(text)
+            all_ids = text_index[index, :]
+            char_list = []
+            for ids in all_ids:
+                charsss = self.character[ids]
+                char_list.append(charsss)
+#             text = ''.join([self.character[i] for i in text_index[index, :]])
+#             texts.append(text)
             
         return texts
 
+
+class AttnLabelConverter_mid(object):
+    
+    def __init__(self, chars, device):
+        list_token = ['[GO]', '[s]']
+        list_token.extend(list(chars))
+        
+#         list_token = ['[GO]',
+#  '[s]',
+#  ' ',
+#  'ㅏ',
+#  'ㅑ',
+#  'ㅓ',
+#  'ㅕ',
+#  'ㅗ',
+#  'ㅛ',
+#  'ㅜ',
+#  'ㅠ',
+#  'ㅡ',
+#  'ㅣ',
+#  'ㅐ',
+#  'ㅒ',
+#  'ㅔ',
+#  'ㅖ',
+#  'ㅘ',
+#  'ㅙ',
+#  'ㅚ',
+#  'ㅝ',
+#  'ㅞ',
+#  'ㅟ',
+#  'ㅢ']
+        self.character = list_token 
+        self.n_cls = len(self.character)
+        self.device = device
+        
+        self.dict = {}
+        for i, char in enumerate(self.character):
+            self.dict[char] = i
+    
+    def encode(self, text, batch_max_length = 25):
+        length = [len(s) + 1 for s in text] # +1 for [s]
+        batch_max_length +=1
+        # additional +1 for [GO] at first step. batch_text is padded with [GO]  token after [s] token.
+        batch_text = torch.LongTensor(len(text), batch_max_length + 1).fill_(0)
+        for i, t in enumerate(text):
+            text = list(t)
+            text.append('[s]')
+            text = [self.dict[char] for char in text]
+            batch_text[i][1 : 1+len(text)] = torch.LongTensor(text)
+        return (batch_text.to(self.device ), torch.IntTensor(length).to(self.device))
+#         return (batch_text, torch.IntTensor(length))
+    
+    
+    def decode(self, text_index, length):
+        texts = []
+        for index, i in enumerate(length):
+            all_ids = text_index[index, :]
+            char_list = []
+            for ids in all_ids:
+                charsss = self.character[ids]
+                char_list.append(charsss)
+#             text = ''.join([self.character[i] for i in text_index[index, :]])
+#             texts.append(text)
+            
+        return texts
+
+class AttnLabelConverter_bot(object):
+    
+    def __init__(self, chars, device):
+        list_token = ['[GO]', '[s]']
+        list_token.extend(list(chars))
+        
+#         list_token = ['[GO]',
+#  '[s]',
+#  ' ',
+#  'ㄱ',
+#  'ㄴ',
+#  'ㄷ',
+#  'ㄹ',
+#  'ㅁ',
+#  'ㅂ',
+#  'ㅅ',
+#  'ㅇ',
+#  'ㅈ',
+#  'ㅊ',
+#  'ㅋ',
+#  'ㅌ',
+#  'ㅍ',
+#  'ㅎ',
+#  'ㄲ',
+#  'ㄸ',
+#  'ㅃ',
+#  'ㅆ',
+#  'ㅉ',
+#  'ㄳ',
+#  'ㄵ',
+#  'ㄶ',
+#  'ㄺ',
+#  'ㄻ',
+#  'ㄼ',
+#  'ㄽ',
+#  'ㄾ',
+#  'ㄿ',
+#  'ㅀ',
+#  'ㅄ']
+        self.character = list_token 
+        self.n_cls = len(self.character)
+        self.device = device
+        
+        self.dict = {}
+        for i, char in enumerate(self.character):
+            self.dict[char] = i
+    
+    def encode(self, text, batch_max_length = 25):
+        length = [len(s) + 1 for s in text] # +1 for [s]
+        batch_max_length +=1
+        # additional +1 for [GO] at first step. batch_text is padded with [GO]  token after [s] token.
+        batch_text = torch.LongTensor(len(text), batch_max_length + 1).fill_(0)
+        for i, t in enumerate(text):
+            text = list(t)
+            text.append('[s]')
+            text = [self.dict[char] for char in text]
+            batch_text[i][1 : 1+len(text)] = torch.LongTensor(text)
+        return (batch_text.to(self.device ), torch.IntTensor(length).to(self.device))
+#         return (batch_text, torch.IntTensor(length))
+    
+    
+    def decode(self, text_index, length):
+        texts = []
+        for index, i in enumerate(length):
+            all_ids = text_index[index, :]
+            char_list = []
+            for ids in all_ids:
+                charsss = self.character[ids]
+                char_list.append(charsss)
+#             text = ''.join([self.character[i] for i in text_index[index, :]])
+#             texts.append(text)
+            
+        return texts
     
 def str_combine(decode_top, decode_mid, decode_bot):
         
