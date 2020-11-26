@@ -33,32 +33,35 @@ sys.path.append('/home/Data/FoodDetection/AI_OCR/Whatiswrong')
 sys.path.append('/home/Data/FoodDetection/AI_OCR/Scatter')
 from utils import *
 # from augs import *
+import traceback
+
+
 
 class CustomDataset_clf(Dataset):
     
-    def __init__(self, dataset,device, resize_shape = (64, 256), input_channel = 3, is_module=False, is_train = True ):
+    def __init__(self, dataset,device, resize_shape, width_char, nchar_resize_shape = (64, 256), input_channel = 3, is_module=False, is_train = True ):
         self.dataset = dataset
+        self.nchar_resize_H = nchar_resize_shape[0]
+        self.nchar_resize_W = nchar_resize_shape[1]
         self.resize_H = resize_shape[0]
         self.resize_W = resize_shape[1]
-        self.resize_max_W = int(self.resize_H/4) * 23
+        self.width_char = width_char
+        self.resize_max_W = width_char * 23
         self.totensor = transforms.ToTensor()
         self.is_train = is_train
         self.is_module = is_module  #### for robust scanner dataset
         
         # use for training additional model or training itself
         if self.is_module:
-#             name = 'efficientnet-b3'
             name = 'efficientnet-b0'
             self.model = EfficientNet.from_name(name, include_top=True)
             self.model._fc = torch.nn.Linear(in_features = self.model._fc.in_features, out_features = 24, bias=True)
 #             previous_iter = get_latest_model(name, './Nchar_clf/models')
-#             load_path = f'./Nchar_clf/models/{name}_{previous_iter}.pth'
 #             load_path = f'./models/Nchar_clf_1108/0/bestacc_0.96_0.pth'
-            load_path = './models/Nchar_clf_1107/0/bestacc_0.957_14000.pth'
+            load_path = './models/Nchar_clf_1116/0/efficientnet-b0_bestacc_0.99.pth'
             print(f'{load_path} is loaded for n_char model')
             if load_path :
                 self.model.load_state_dict(torch.load(load_path, map_location='cpu'))
-#             self.model = torch.nn.DataParallel(self.model, device_ids = [0,1]).to(device)
             self.model = self.model.to(torch.device('cpu'))
             self.model = self.model.eval()
             
@@ -70,13 +73,13 @@ class CustomDataset_clf(Dataset):
                 albumentations.RandomBrightnessContrast(p=0.5),
 #                 albumentations.RandomFog(fog_coef_lower=0.1, fog_coef_upper=0.8, p=0.5 ),
                 albumentations.augmentations.transforms.Rotate(limit=10, p=0.5),
-                albumentations.Resize(self.resize_H, self.resize_W),
+                albumentations.Resize(self.nchar_resize_H, self.nchar_resize_W),
                 albumentations.Normalize( mean=[0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]),
                 albumentations.pytorch.transforms.ToTensor()
             ])
         else:
             self.transform = albumentations.Compose([
-                albumentations.Resize(self.resize_H, self.resize_W),
+                albumentations.Resize(self.nchar_resize_H, self.nchar_resize_W),
                 albumentations.Normalize( mean=[0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]),
                 albumentations.pytorch.transforms.ToTensor()
             ])
@@ -100,7 +103,7 @@ class CustomDataset_clf(Dataset):
                 rotate_flag=False
                 
             if rotate_flag  :
-                image = cv2.rotate(image,  cv2.ROTATE_90_CLOCKWISE)
+                image = cv2.rotate(image,  cv2.ROTATE_90_COUNTERCLOCKWISE)
                 
             image_trsf= self.transform(image=image)['image']
             image_tensor = torch.Tensor(image_trsf).unsqueeze_(0)
@@ -109,7 +112,7 @@ class CustomDataset_clf(Dataset):
             pred_cls = torch.argmax(torch.softmax(pred_nchar, -1), -1)
             nchar = pred_cls.cpu().detach().numpy()[0]
 #             print('nchar pred : ', nchar)
-            resize_char_width = int(self.resize_H/4) * nchar
+            resize_char_width = self.width_char * nchar
             image_resize = cv2.resize(image, (resize_char_width, self.resize_H))
             image_tensor = self.totensor(image_resize)
             c, h , w = image_tensor.size()
@@ -142,8 +145,12 @@ class CustomDataset_clf(Dataset):
             return image, len(label)
     
     def load_and_cvt(self, img_path):
-        image = cv2.imread(img_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        try :
+            image = cv2.imread(img_path)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        except:
+            traceback.print_exc
+            print('fucking image path is here : ' , img_path)
         return image
     
     def weird_img_scanner(self, image):
@@ -157,7 +164,59 @@ class CustomDataset_clf(Dataset):
             rotate_flag = True
         return skip_flag, rotate_flag
 
+class CustomDataset_syllable(CustomDataset_clf):
+    def __init__(self, dataset, device, resize_shape, width_char, nchar_resize_shape = (64, 256), max_length = 23,  is_module=False, is_train = True ):
+        super(CustomDataset_syllable, self).__init__(dataset, device, resize_shape, width_char,  nchar_resize_shape, max_length, is_module, is_train)
+#         self.core_resize_height = core_resize_height
+#         self.core_resize_width_max = int(self.core_resize_height/4) * 23
+
+    def __getitem__(self, idx):
+        
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        try:
+            img_path, label= self.dataset[idx]
+            image = self.load_and_cvt(img_path)
+            skip_flag, rotate_flag = self.weird_img_scanner(image)
+            
+        except:
+            traceback.print_exc
+            print('fucking image path is here : ' , img_path)
+            img_path, label= self.dataset[idx-1]
+            image = self.load_and_cvt(img_path)
+            skip_flag, rotate_flag = self.weird_img_scanner(image)
+        
+        if skip_flag:
+            img_path, label = self.dataset[idx-1]
+            image = self.load_and_cvt(img_path)
+            rotate_flag=False
+            
+        if rotate_flag  :
+            image = cv2.rotate(image,  cv2.ROTATE_90_COUNTERCLOCKWISE)
+        
+        image_trsf = self.transform(image=image)['image']
+        
+        if self.is_module:
+            image_tensor = torch.Tensor(image_trsf).unsqueeze_(0)
+            
+            pred_nchar = self.model(image_tensor)
+            pred_cls = torch.argmax(torch.softmax(pred_nchar, -1), -1)
+            nchar = pred_cls.cpu().detach().numpy()[0]
+#             print('nchar pred : ', nchar)
+            resize_char_width = self.width_char * nchar
+            image_resize = cv2.resize(image, (resize_char_width, self.resize_H))
+            image_tensor = self.totensor(image_resize)
+            c, h , w = image_tensor.size()
+            pad_img = torch.FloatTensor(*(3, self.resize_H, self.resize_max_W)).fill_(0)
+            pad_img[:, :, :w] =image_tensor
+            
+            if self.resize_max_W != w:
+                pad_img[:,:,w:] = image_tensor[:,:,-1].unsqueeze(2).expand(c,h, self.resize_max_W - w)
+
+            return (pad_img, label)
     
+        else:
+            return image_trsf, len(label)
     
 def get_accuracy(pred, label):
     pred_max = torch.argmax(torch.softmax(pred, -1), -1)
@@ -206,11 +265,8 @@ class GridMask(DualTransform):
   
             n_g_width = int(ratio * n_g) 
             grid_h = height / n_g if height / n_g >0 else 1
-#             grid_w = width / n_g
             grid_w = width / n_g_width if width / n_g_width >0 else 1
-#             print(f'grid_h : {grid_h}, grid_w : {grid_w}')
             this_mask = np.ones((int((n_g + 20) * grid_h), int((n_g_width + 20) * grid_w))).astype(np.uint8)
-#             print('mask size : ', this_mask.shape)
             for i in range(n_g + 1):
                 for j in range(n_g_width + 1):
                     this_mask[
