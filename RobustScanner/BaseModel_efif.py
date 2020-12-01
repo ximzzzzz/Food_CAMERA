@@ -16,15 +16,15 @@ import torchvision.transforms as transforms
 import utils
 from utils import *
 import Trans
-import Extract
-import PositionEnhancement
-import Hybrid
+import Extract_efif
+import PositionEnhancement_efif
+import Hybrid_efif
 import importlib
 from efficientnet_pytorch import EfficientNet
 import torchvision.models as models
 
-importlib.reload(PositionEnhancement)
-importlib.reload(Hybrid)
+importlib.reload(PositionEnhancement_efif)
+importlib.reload(Hybrid_efif)
 
 class model(nn.Module):
     def __init__(self, opt, device):
@@ -40,13 +40,13 @@ class model(nn.Module):
                                                         device = device)
         #Extract
         if self.opt.extract =='RCNN':
-            self.Extract = self.Extract = Extract.RCNN_extractor(opt.input_channel, opt.output_channel)
+            self.Extract = Extract_efif.RCNN_extractor(opt.input_channel, opt.output_channel)
         elif 'efficientnet' in self.opt.extract :    
             self.Extract = EfficientNet.from_name(opt.extract)
 #             self.Nin = torch.nn.Conv2d(1536, opt.output_channel, 1) # b3
             self.Nin = torch.nn.Conv2d(2304, opt.output_channel, 1) # b6
         elif 'resnet' in self.opt.extract:
-            self.Extract = Extract.ResNet_FeatureExtractor(opt.input_channel, opt.output_channel)
+            self.Extract = Extract_efif.ResNet_FeatureExtractor(opt.input_channel, opt.output_channel)
         elif 'densenet' in self.opt.extract:
             self.Extract = torch.hub.load('pytorch/vision:v0.6.0', 'densenet161', pretrained=False)
 #             self.Nin = torch.nn.Conv2d(1024, opt.output_channel, 1) # 121
@@ -61,15 +61,15 @@ class model(nn.Module):
 #         self.AdaptiveAvgPool = nn.AdaptiveAvgPool2d((None,1)) # imgH/16-1   ->  1
    
         #  Position aware module
-        self.PAM = PositionEnhancement.PositionAwareModule(opt.output_channel, opt.hidden_size, opt.output_channel, 2)
+        self.PAM = PositionEnhancement_efif.PositionAwareModule(opt.output_channel, opt.hidden_size, opt.output_channel, 2)
         
-        self.PAttnM = PositionEnhancement.AttnModule(opt, opt.hidden_size, opt.bot_n_cls, device)
+        self.PAttnM = PositionEnhancement_efif.AttnModule(opt, opt.hidden_size, opt.n_cls, device)
 
         # Hybrid branch
-        self.Hybrid = Hybrid.HybridBranch(opt.output_channel, opt.batch_max_length+1, opt.bot_n_cls, device)
+        self.Hybrid = Hybrid_efif.HybridBranch(opt.output_channel, opt.batch_max_length+1, opt.n_cls, device)
             
 #         # Dynamically fusing module
-        self.Dynamic_fuser = PositionEnhancement.DynamicallyFusingModule(opt.top_n_cls)
+        self.Dynamic_fuser = PositionEnhancement_efif.DynamicallyFusingModule(opt.n_cls)
         
 
     def forward(self, input, text, is_train=False):
@@ -98,15 +98,14 @@ class model(nn.Module):
         position_feature = self.PAM(visual_feature)
 #         print('Position feature : ' ,position_feature)
         
-        g_prime, context = self.PAttnM(position_feature.permute(0,2,3,1), visual_feature.permute(0,2,3,1))
+        g_prime, g_prime_context = self.PAttnM(position_feature.permute(0,2,3,1), visual_feature.permute(0,2,3,1))
         
 #         print('G`bot : ', g_prime_bot)
 
-        g = self.Hybrid(visual_feature, text, is_train)
+        g, g_context = self.Hybrid(visual_feature, text, is_train)
         
-#         print('G bot : ', g_bot)
-#         print('G mid : ', g_mid)
-#         print('G top : ', g_top)
+        print('g_prime context shape : ', g_prime_context.shape)
+        print('g context shape : ', g_context.shape)
         
         pred = self.Dynamic_fuser(g, g_prime)
 

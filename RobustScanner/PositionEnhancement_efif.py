@@ -72,7 +72,7 @@ class AttnModule(nn.Module):
             output_hiddens[:, i, :] = context.squeeze(1)
         g_prime = self.generator(output_hiddens)
             
-        return g_prime, context        
+        return g_prime, output_hiddens        
     
     
 class DynamicallyFusingModule(nn.Module):
