@@ -19,11 +19,12 @@ class HybridBranch(nn.Module):
         self.device = device
         
     def forward(self, origin_fmap, text, is_train):
-        batch_size = text.size(0)
+        batch_size, channels, height, width  = origin_fmap.size()
         output_hiddens = torch.FloatTensor(batch_size, self.num_steps, self.hidden_size).fill_(0).to(self.device)
+        masks = torch.FloatTensor(batch_size, self.num_steps, height, width).fill_(0).to(self.device)
         states = (torch.FloatTensor(2, batch_size, self.hidden_size).fill_(0).to(self.device) , 
                   torch.FloatTensor(2, batch_size, self.hidden_size).fill_(0).to(self.device))
-        origin_fmap_trans = origin_fmap.permute(0, 2, 3, 1).view(batch_size, -1, self.hidden_size)
+        origin_fmap_trans = origin_fmap.permute(0, 2, 3, 1).view(batch_size, -1, self.hidden_size) # (N, C, H, W ) -> (H, H*W, C)
 
         if is_train :
             for i in range(self.num_steps):
@@ -36,7 +37,9 @@ class HybridBranch(nn.Module):
 #                 print(f'origin fmap trans shape : {origin_fmap_trans.shape}')
                 a = torch.softmax(torch.bmm( output, origin_fmap_trans.permute(0, 2, 1)), 1)
 #                 print(f'attention map shape : {a.shape}')  # ( batch, 1 , fmap_dim )
+                mask = a.reshape((batch_size, 1, height, width))
                 context = torch.bmm(a, origin_fmap_trans)
+                masks[:,[i], :] = mask
                 output_hiddens[:, i, :] = context.squeeze(1)
             g = self.generator(output_hiddens)
 
@@ -58,11 +61,13 @@ class HybridBranch(nn.Module):
                 self.lstm.flatten_parameters()
                 output, states = self.lstm(x_t_emb, states)
                 a = torch.softmax(torch.bmm(output , origin_fmap_trans.permute(0,2,1)), 1)
+                mask = a.reshape((batch_size, 1, height, width))
                 context = torch.bmm(a, origin_fmap_trans)
+                masks[:,[i], :] = mask
                 output_hiddens[:, i, :] = context.squeeze(1)
                 g_t = self.generator(context)
 
                 _, next_input = g_t.max(2)
                 g[:, i, :] = g_t.squeeze(1)
 
-        return g, output_hiddens
+        return g, output_hiddens, masks
