@@ -94,12 +94,15 @@ class Generator(nn.Module):
     
     
     def glyph_loss(self, glyphs, target, target_length, embedding_ids, opt):
-        target_glyph_ids = target.reshape((opt.batch_size * (self.seq_len+1), 1)) + 2447 * embedding_ids
+        target_glyph_ids = target.reshape((opt.batch_size * (opt.batch_max_length+1), 1)) + 2447 * embedding_ids
         ref_target = self.ref_glyphs[target_glyph_ids.reshape(-1,)]
+        ref_target = ref_target.reshape((opt.batch_size, opt.batch_max_length+1, 32*32))
+#         print(f'glyphs shape : {glyphs.shape}')
+#         print(f'ref_target shape : {ref_target.shape}')
         l1_loss_ = self.criterion(glyphs, ref_target)
         l1_avg = torch.mean(l1_loss_, dim=2) # [N, max_seq +1]
         
-        max_lengths = torch.Tensor(list(range(opt.max_length+1))).repeat((opt.batch_size,1)).to(self.device)
+        max_lengths = torch.Tensor(list(range(opt.batch_max_length+1))).repeat((opt.batch_size,1)).to(self.device)
         loss_mask = torch.lt(max_lengths, target_length.reshape(-1,1))
         masked_loss = torch.mul(l1_avg, loss_mask)
         row_losses = torch.sum(masked_loss, dim=1)
