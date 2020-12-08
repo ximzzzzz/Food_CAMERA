@@ -18,22 +18,26 @@ import time
 import os
 
 #             0 features shape : torch.Size([5, 64, 64, 256])
-#             1 features shape : torch.Size([5, 128, 32, 128])
-#             2 features shape : torch.Size([5, 256, 16, 64])
-#             3 features shape : torch.Size([5, 512, 8, 65])
+#             1 features shape : torch.Size([5, 128, 32, 128]) ## this one
+#             2 features shape : torch.Size([5, 256, 16, 64])  ## this one
+#             3 features shape : torch.Size([5, 512, 8, 65])   ## this one
 #             4 features shape : torch.Size([5, 512, 3, 65])
 
 class Generator(nn.Module):
     def __init__(self, opt, device):
         super(Generator, self).__init__()
-        self.fc_1 = nn.Linear(int(opt.img_h/2)*int(opt.img_w/2), 16 * 16)
+#         self.fc_1 = nn.Linear(int(opt.img_h/2)*int(opt.img_w/2), 16 * 16)
+#         self.fc_2 = nn.Linear(int(opt.img_h/4)*int(opt.img_w/4), 8 * 8)
+#         self.fc_3 = nn.Linear(int(opt.img_h/8)*(int(opt.img_w/4)+1), 4 * 4) # when opt.width is set to 256, width of feature_map_list[3] become 65,not 64
+
+        self.fc_1 = nn.Linear(int(opt.img_h/2) * int(opt.img_w/2), 16 * 16)
         self.fc_2 = nn.Linear(int(opt.img_h/4)*int(opt.img_w/4), 8 * 8)
-        self.fc_3 = nn.Linear(int(opt.img_h/8)*(int(opt.img_w/4)+1), 4 * 4) # when opt.width is set to 256, width of feature_map_list[3] become 65,not 64
+        self.fc_3 = nn.Linear(int(opt.img_h/8)*(int(opt.img_w/4)), 4 * 4) 
         self.Deconv_1 = nn.ConvTranspose2d(opt.fmap_dim + 128, 128, kernel_size = [2,2], stride = [2,2])
         self.Deconv_2 = nn.ConvTranspose2d(128, 64, kernel_size = [2,2], stride = [2,2])
-        self.Deconv_3 = nn.ConvTranspose2d((64+512), 32, kernel_size = [2,2], stride= [2,2]) # ref : fmap list idx 3 (channels 512)
-        self.Deconv_4 = nn.ConvTranspose2d((32+256), 16, kernel_size = [2,2], stride = [2,2])  # ref : fmap list idx 2 (channels 256)
-        self.Deconv_5 = nn.ConvTranspose2d((16+128), 1, kernel_size = [2,2], stride=[2,2])  # ref : fmap list idx1 (channels 128)
+        self.Deconv_3 = nn.ConvTranspose2d((64 + 128), 32, kernel_size = [2,2], stride= [2,2]) # ref : fmap list idx 3 (channels 512)
+        self.Deconv_4 = nn.ConvTranspose2d((32 + 64), 16, kernel_size = [2,2], stride = [2,2])  # ref : fmap list idx 2 (channels 256)
+        self.Deconv_5 = nn.ConvTranspose2d((16 + 32), 1, kernel_size = [2,2], stride=[2,2])  # ref : fmap list idx1 (channels 128)
         self.num_fonts = opt.num_fonts
         self.font_embedding = nn.Embedding(self.num_fonts, 128)
         self.ref_glyphs = torch.Tensor(np.load('./EFIFSTR/data/glyphs_ko_104.npy')).to(device)
@@ -42,14 +46,20 @@ class Generator(nn.Module):
         
         
     def generate_glimpse(self, fmap, masks):
+#         print(f'f map shape : {fmap.shape}')
         _, fmap_c, fmap_h, fmap_w = fmap.shape
+#         print('origin masks : ', masks.shape)
         mask = F.interpolate(masks, size = (fmap_h, fmap_w), mode ='bilinear', align_corners=False)
+#         print('after interpolate : ', mask.shape)
         mask = mask.repeat(1, fmap_c, 1, 1)
+#         print('after channel repeat : ',mask.shape)
         fmap = fmap.unsqueeze(1)
+#         print(f'after unsqueeze fmap shape " {fmap.shape}')
         fmap = fmap.repeat(1, self.seq_len, 1, 1, 1).reshape((self.batch_size * self.seq_len, fmap_c, fmap_h, fmap_w))
+#         print(f'after fmap shape " {fmap.shape}')
         glimpse = torch.mul(mask, fmap)
         
-        glimpse = glimpse.reshape((self.batch_size * self.seq_len, fmap_c, fmap_h*fmap_w))
+        glimpse = glimpse.reshape((self.batch_size * self.seq_len, fmap_c, fmap_h * fmap_w))
         
         return glimpse, fmap_c
     
@@ -59,9 +69,12 @@ class Generator(nn.Module):
         self.batch_size, self.seq_len, self.height, self.width = masks.shape
         masks = masks.reshape((self.batch_size * self.seq_len, 1, self.height, self.width))
         
-        glimpse_s1, fmap_s1_c = self.generate_glimpse(feature_map_list[1], masks)
-        glimpse_s2, fmap_s2_c = self.generate_glimpse(feature_map_list[2], masks)
-        glimpse_s3, fmap_s3_c = self.generate_glimpse(feature_map_list[3], masks)
+#         glimpse_s1, fmap_s1_c = self.generate_glimpse(feature_map_list[1], masks)
+#         glimpse_s2, fmap_s2_c = self.generate_glimpse(feature_map_list[2], masks)
+#         glimpse_s3, fmap_s3_c = self.generate_glimpse(feature_map_list[3], masks)
+        glimpse_s1, fmap_s1_c = self.generate_glimpse(feature_map_list[0], masks)
+        glimpse_s2, fmap_s2_c = self.generate_glimpse(feature_map_list[1], masks)
+        glimpse_s3, fmap_s3_c = self.generate_glimpse(feature_map_list[2], masks)
         
 #         print(f'glimpse s1 shape : {glimpse_s1.shape}, s1 channels : {fmap_s1_c}')
 #         print(f'glimpse s2 shape : {glimpse_s2.shape}, s1 channels : {fmap_s2_c}')
@@ -73,11 +86,11 @@ class Generator(nn.Module):
         glimpse_1 = self.fc_1(glimpse_s1).reshape((self.batch_size * self.seq_len, fmap_s1_c, 16, 16))
         glimpse_2 = self.fc_2(glimpse_s2).reshape((self.batch_size * self.seq_len, fmap_s2_c, 8,8))
         glimpse_3 = self.fc_3(glimpse_s3).reshape((self.batch_size * self.seq_len, fmap_s3_c, 4,4))
-        
+
         embedding_ids = torch.randint(low=0, high=self.num_fonts, size=(self.batch_size * self.seq_len, 1)).to(self.device)
         font_embedded = self.font_embedding(embedding_ids).reshape((self.batch_size * self.seq_len, 128, 1, 1))
         
-        # deconv stage
+#         # deconv stage
         glimpses_deconv = glimpses.reshape((self.batch_size * self.seq_len, feature_c, 1, 1))
         concat_deconv = torch.cat([glimpses_deconv, font_embedded], axis=1)
         
@@ -91,6 +104,7 @@ class Generator(nn.Module):
         glyph = d5.reshape((self.batch_size, self.seq_len, 32*32))
         
         return glyph, embedding_ids
+#         return (d1, d2, d3, d4, d5)
     
     
     def glyph_loss(self, glyphs, target, target_length, embedding_ids, opt):
@@ -111,9 +125,4 @@ class Generator(nn.Module):
         
         return generation_loss
     
-        
-        
-        
-        
-        
-    
+  
