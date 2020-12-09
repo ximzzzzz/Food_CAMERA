@@ -41,7 +41,8 @@ class Generator(nn.Module):
         self.num_fonts = opt.num_fonts
         self.font_embedding = nn.Embedding(self.num_fonts, 128)
         self.ref_glyphs = torch.Tensor(np.load('./EFIFSTR/data/glyphs_ko_104.npy')).to(device)
-        self.criterion = torch.nn.L1Loss(reduction='none').to(device)
+#         self.criterion = torch.nn.L1Loss(reduction='none').to(device)
+        self.criterion = torch.nn.MSELoss(reduction='none').to(device)
         self.device = device
         
         
