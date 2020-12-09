@@ -117,6 +117,8 @@ class model(nn.Module):
         # 4 features shape : torch.Size([5, 512, 3, 65])
                 
         position_feature = self.PAM(visual_feature[-1])
+#         print(f'position_feature shape : {position_feature.shape}')
+#         print(f'origin_feature shape : {visual_feature[-1].shape}')
 
         g_prime, g_prime_context, masks_prime = self.PAttnM(position_feature.permute(0,2,3,1), visual_feature[-1].permute(0,2,3,1))
 
@@ -127,7 +129,7 @@ class model(nn.Module):
 
 #         g_context = torch.add(g_context, g_prime_context)
 
-        glyph, embedding_ids = self.glyph(visual_feature, masks, g_context)
+        glyph, embedding_ids = self.glyph(visual_feature, masks_prime, g_prime_context)
 #         glyph = self.glyph(visual_feature, masks, g_context)
     
         pred = self.Dynamic_fuser(g, g_prime)
