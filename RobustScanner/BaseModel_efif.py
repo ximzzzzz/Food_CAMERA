@@ -127,10 +127,13 @@ class model(nn.Module):
 #         print('g_prime context shape : ', g_prime_context.shape)   # torch.Size([5, 26, 512]
 #         print('g context shape : ', g_context.shape)  # torch.Size([5, 26, 512]
 
-#         g_context = torch.add(g_context, g_prime_context)
-
-        glyph, embedding_ids = self.glyph(visual_feature, masks_prime, g_prime_context)
-#         glyph = self.glyph(visual_feature, masks, g_context)
+        if self.opt.glyph_source== "position":
+            glyph, embedding_ids = self.glyph(visual_feature, masks_prime, g_prime_context)
+            
+        elif self.opt.glyph_source== "hybrid":
+            glyph, embedding_ids = self.glyph(visual_feature, masks, g_context)
+        else:
+            raise Exception
     
         pred = self.Dynamic_fuser(g, g_prime)
 
