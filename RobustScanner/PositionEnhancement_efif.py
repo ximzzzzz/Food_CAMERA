@@ -7,7 +7,7 @@ class PositionAwareModule(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, lstm_layers):
         super(PositionAwareModule, self).__init__()
 #         self.lstm = nn.LSTM(input_size, int(hidden_size/2), lstm_layers, bidirectional=True)
-        self.lstm = nn.LSTM(input_size, hidden_size, lstm_layers)
+        self.lstm = nn.LSTM(input_size, hidden_size, lstm_layers, batch_first=True)
         self.conv1 = nn.Conv2d(hidden_size, hidden_size, kernel_size=3, 
                                padding=1
                               )
@@ -21,14 +21,18 @@ class PositionAwareModule(nn.Module):
         lstm_fmap = features.permute(0,2,3,1)
         lstm_row_list = []
         for i in range(rows):
-            row_res, _ = self.lstm(features.permute(0, 2, 3, 1)[:, i, :, :])
+            row_res, states = self.lstm(features.permute(0, 2, 3, 1)[:, i, :, :])
+#             print(f'each row lstm result output shape : {row_res.shape}')
+#             print(f'each row lstm result state shape : {states[0].shape}')
             lstm_row_list.append(row_res.unsqueeze(1))
         lstm_fmap = torch.cat(lstm_row_list, dim=1)
         conv_fmap = lstm_fmap.permute(0, 3, 1, 2)
-        
+#         print(f'first conv_fmap shape : {conv_fmap.shape}')
         conv_fmap = self.conv1(conv_fmap)
+#         print(f'second conv_fmap shape : {conv_fmap.shape}')
         torch.relu_(conv_fmap)
         conv_fmap = self.conv2(conv_fmap)
+#         print(f'third conv_fmap shape : {conv_fmap.shape}')
 #         conv_fmap = conv_fmap.permute(0, 2, 3, 1)
         return conv_fmap
         
@@ -48,15 +52,16 @@ class AttnModule(nn.Module):
         
     def forward(self, position_fmap, origin_fmap): # channel last input, throught .permute(batchsize, height, width, channel)
         num_steps = self.opt.batch_max_length + 1
-        batch_size = position_fmap.size(0)
-        hidden_size = position_fmap.size(-1)
+        batch_size, height, width, hidden_size = position_fmap.size()
+        masks = torch.FloatTensor(batch_size, num_steps, height, width).fill_(0).to(self.device)
         output_hiddens = torch.FloatTensor(batch_size, num_steps, hidden_size).fill_(0).to(self.device)
 
         for i in range(num_steps):
             position_embedded = self.position_embedding_layer(torch.LongTensor(batch_size).fill_(i).to(self.device))
 #             position_embedded = self.position_embedding_layer(torch.LongTensor(1).fill_(i).to(self.device)) ####### temp for deployment!
             a = torch.softmax(torch.bmm(position_fmap.view(batch_size, -1, hidden_size) , position_embedded.unsqueeze(2)), 1)
-            
+            mask = a.reshape((batch_size, 1, height, width ))
+        
             ######### Bahdanau et al. (2015) ###########
 #             position_weighted = self.embedding_weight(position_embedded) #
 #             position_score = self.embedding_score(position_weighted)   #
@@ -68,18 +73,21 @@ class AttnModule(nn.Module):
 #             print('origin fmap : ', origin_fmap.shape)
 #             print('position fmap : ', position_fmap.shape)
 #             print('origin fmap view : ' , origin_fmap.view(batch_size, -1, hidden_size).shape)
+
             context = torch.bmm(a.permute(0,2,1), origin_fmap.view(batch_size, -1, hidden_size))
+            masks[:,[i],:] = mask
             output_hiddens[:, i, :] = context.squeeze(1)
         g_prime = self.generator(output_hiddens)
             
-        return g_prime, output_hiddens        
+        return g_prime, output_hiddens, masks        
     
     
 class DynamicallyFusingModule(nn.Module):
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, device):
         super(DynamicallyFusingModule , self).__init__()
         self.lin1 = nn.Linear(n_classes *2, n_classes)
         self.lin2 = nn.Linear(n_classes *2, n_classes)
+        self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0).to(device)
     
     def forward(self, g, g_prime):
 #         print('g : ', g.shape)
@@ -92,3 +100,9 @@ class DynamicallyFusingModule(nn.Module):
         pred = lin1_res * lin2_res
         
         return pred
+    
+    
+    def recognition_loss(self, logits, target):
+        recognition_loss_ = self.criterion(logits, target)
+        
+        return recognition_loss_

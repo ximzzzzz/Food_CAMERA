@@ -4,9 +4,13 @@ import torch.nn.functional as F
 
 class PositionAwareModule(nn.Module):
     
-    def __init__(self, input_size, hidden_size, output_size, lstm_layers):
+    def __init__(self, input_size, hidden_size, output_size, lstm_layers, position_direction=1):
         super(PositionAwareModule, self).__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, lstm_layers)
+        if position_direction==1:
+            self.lstm = nn.LSTM(input_size, hidden_size, lstm_layers, batch_first=True)
+        else:
+            self.lstm = nn.LSTM(input_size, int(hidden_size/2), lstm_layers, bidirectional=True, batch_first=True)
+        
         self.conv1 = nn.Conv2d(hidden_size, hidden_size, kernel_size=3, 
                                padding=1
                               )
@@ -53,6 +57,7 @@ class AttnModule(nn.Module):
 
         for i in range(num_steps):
             position_embedded = self.position_embedding_layer(torch.LongTensor(batch_size).fill_(i).to(self.device))
+#             position_embedded = self.position_embedding_layer(torch.LongTensor(1).fill_(i).to(self.device)) ####### temp for deployment!
             a = torch.softmax(torch.bmm(position_fmap.view(batch_size, -1, hidden_size) , position_embedded.unsqueeze(2)), 1)
             
             ######### Bahdanau et al. (2015) ###########
