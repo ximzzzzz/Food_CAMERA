@@ -334,7 +334,7 @@ for num in range(num_bboxes):
 
 # -----
 
-# In[9]:
+# In[8]:
 
 
 import json
@@ -398,7 +398,7 @@ import importlib
 importlib.reload(crop_words_)
 
 
-# In[10]:
+# In[9]:
 
 
 # opt
@@ -429,16 +429,16 @@ opt.mid_n_cls = len(middle_converter.character)
 opt.bot_n_cls = len(bottom_converter.character)
 
 
-# In[11]:
+# In[388]:
 
 
 model = BaseModel.model(opt, device)
-model.load_state_dict(torch.load('/Data/FoodDetection/AI_OCR/models/RobustScanner_1221/0/best_accuracy_94.96.pth', map_location='cpu' if device.type=='cpu' else 'cuda')) 
+model.load_state_dict(torch.load('/Data/FoodDetection/AI_OCR/models/RobustScanner_1221/0/best_accuracy_96.54.pth', map_location='cpu' if device.type=='cpu' else 'cuda')) 
 model.to(device)
 _ = model.eval()
 
 
-# In[12]:
+# In[389]:
 
 
 def recog_run(opt, device, model, cropped_imgs=None):
@@ -506,7 +506,7 @@ def recog_run(opt, device, model, cropped_imgs=None):
     return recognition_list
 
 
-# In[13]:
+# In[390]:
 
 
 def Detection(net, urlFilepath):
@@ -617,7 +617,7 @@ def Detection(net, urlFilepath):
                 image = cv2.imread(os.path.join(start, data['image_name'][image_num]))
                 image_name = data['image_name'][image_num].strip('.jpg')
                 score_bbox = data['word_bboxes'][image_num].split('),')
-                cropped_imgs = crop_words_.generate_words(image_name, score_bbox, image, crop_path)
+                cropped_imgs = crop_words_.generate_words(image_name, score_bbox, image, crop_path, bbox_show=False)
             
             print("=========Text Detection and Crop Ends ============")
               
@@ -633,7 +633,7 @@ def Detection(net, urlFilepath):
 #     return data
 
 
-# In[14]:
+# In[13]:
 
 
 def get_weight_df(pts_list, img_center, recognition_list):
@@ -655,7 +655,7 @@ def get_weight_df(pts_list, img_center, recognition_list):
     return crop_df, image_area
 
 
-# In[15]:
+# In[14]:
 
 
 def fine_filtering(crop_df, cropped_array, n_crop=4):
@@ -666,7 +666,7 @@ def fine_filtering(crop_df, cropped_array, n_crop=4):
     return crop_df, cropped_array
 
 
-# In[16]:
+# In[15]:
 
 
 def get_weight_ratio(crop_df, img_center):
@@ -684,7 +684,7 @@ def get_weight_ratio(crop_df, img_center):
     return total_ratio.values
 
 
-# In[131]:
+# In[162]:
 
 
 def filterNweight2(pts_list, img_center, image, cropped_array,  n_crop=4):
@@ -710,7 +710,7 @@ def filterNweight2(pts_list, img_center, image, cropped_array,  n_crop=4):
     
     if len(cropped_array)==0:
         
-        return [], [] 
+        return [], [] ,[]
         
 #     print(f'number of cropped imags : {len(cropped_array)}')
     # get_weight_ratio
@@ -746,7 +746,7 @@ import glob
 # In[19]:
 
 
-def get_pcm_files(input_dir):
+def get_jpg_files(input_dir):
     file_path_list = []
     for i, (root, dirs, files) in enumerate(os.walk(input_dir)):
 #         print(f'root : {root}')
@@ -756,60 +756,58 @@ def get_pcm_files(input_dir):
     return file_path_list
 
 
-# In[45]:
+# In[107]:
 
 
-def rotate_plate_img(img_arr):
-    row_255, col_255, _ = np.where(img_arr[:,:,:]==[255,255,255])
-    coord_255 = np.concatenate((row_255.reshape(-1,1), col_255.reshape(-1,1)), axis=1)
-    row_min = min(row_255)
-    col_min = min(col_255)
+def rotate_plate_img(image, pts, cropped_img):
+    l_t, r_t, r_b, l_b = pts
     
-    if (row_min > img_arr.shape[0] *0.5) or (col_min > img_arr.shape[1] *0.5):
-        return img_arr
-    
-    row_min_ids = np.where(row_255==row_min)[0]
-    col_min_ids = np.where(col_255==col_min)[0]
-#     print(f'row_min_ids : {row_min_ids}, col_min_ids ; {col_min_ids}')
-#     print(f'coord_255 shape : {coord_255.shape}')
-#     print(f'row_min_ids : {row_min_ids}')
-        
-    right_point_coord = coord_255[row_min_ids[-1]]
-    left_point_coord = coord_255[col_min_ids[-1]]
-#     print(f'left_point_coord : {left_point_coord}, right_point_coord ; {right_point_coord}')
-    height = left_point_coord[0]
-    width= right_point_coord[1]
-    hypotenus = np.linalg.norm(left_point_coord - right_point_coord)
-    angle = np.degrees(np.arcsin(height / hypotenus))
-    
-    if angle < 5:
-        return img_arr
-    
-    if height > width :
-        angle = -angle
-        
-    center_coord = get_image_center(np.array([[0,0], [img_arr.shape[0]-1, img_arr.shape[1]-1]]))
-    rotation_matrix = cv2.getRotationMatrix2D(center =center_coord, angle=angle, scale=0.95 )
-    rotated_img = cv2.warpAffine(img_arr, M=rotation_matrix, dsize= (img_arr.shape[1], img_arr.shape[0]))
+    if abs(l_t[0] - l_b[0]) < 5:
+        return cropped_img
+    else:
+        if l_t[0] > l_b[0]:
+            direction = 'non-clockwise'
+        else:
+            direction = 'clockwise'
 
-#     l_bottom_coord = np.array([rotated_raw.shape[0]-2, 16])
-#     r_bottom_coord = np.array([np.where(rotated_raw[:, -4, 0] < 255)[0][-1], rotated_raw.shape[1]-4])
-#     hypotenus = np.linalg.norm(l_bottom_coord- r_bottom_coord)
+        height = l_t[0] - l_b[0]
+        hypotenus = np.linalg.norm(l_t - l_b)
+
+        if height == hypotenus:
+            return cropped_img
+
+        else:
+            if direction =='clockwise':
+                angle = np.degrees(np.arcsin(height / hypotenus))
+#                 side_angle = 180-temp_angle
+#                 angle = 180 - (side_angle + 90)
+            else:
+                angle = np.degrees(np.arcsin(height / hypotenus))
+        #     if height > width :
+        #         angle = -angle
+
+            center_coord = get_image_center(np.array([[0,0], [image.shape[0]-1, image.shape[1]-1]]))
+            rotation_matrix = cv2.getRotationMatrix2D(center =center_coord, angle=angle, scale=1 )
+            rotated_img = cv2.warpAffine(image, M=rotation_matrix, dsize= (image.shape[1], image.shape[0]))
+            
+            pts_refine = np.column_stack([pts, np.ones((4,1))])
+            rotation_matrix_refine = np.concatenate([rotation_matrix, np.array([[0,0,1]])], axis=0)
+            pts_rotated = np.dot(rotation_matrix_refine, pts_refine.transpose())
+            
+            y_min = int(pts_rotated[1].min())
+            y_max = int(pts_rotated[1].max())
+            x_min = int(pts_rotated[0].min())
+            x_max = int(pts_rotated[0].max())
+            
+            cropped_img = rotated_img[y_min:y_max, x_min:x_max]
     
-#     height = rotated_raw.shape[0] - np.where(rotated_raw[:, -4, 0] < 255)[0][-1]
-#     angle = np.degrees(np.arcsin(height / hypotenus))
-#     print(angle)
-#     center_coord = get_image_center(np.array([[0,0], [rotated_raw.shape[0]-1, rotated_raw.shape[1]-1]])) 
-#     rotation_matrix = cv2.getRotationMatrix2D(center = center_coord, angle=-angle, scale=1.0)
-#     img_rotated = cv2.warpAffine(rotated_raw, M = rotation_matrix, dsize= (int(rotated_raw.shape[1]*1.1), rotated_raw.shape[0]))
-    
-    return rotated_img
+        return cropped_img
 
 
 # In[21]:
 
 
-path_list = get_pcm_files('/Data/FoodDetection/data/lexicon/raw/')
+path_list = get_jpg_files('/Data/FoodDetection/data/lexicon/raw/')
 
 
 # In[22]:
@@ -818,38 +816,31 @@ path_list = get_pcm_files('/Data/FoodDetection/data/lexicon/raw/')
 iterer = iter(path_list)
 
 
-# In[228]:
+# In[391]:
 
 
-path = next(iterer)
-[bbox_dict, (cropped_array, pts_list, image)], res_code = Detection(net, path)
+# path = next(iterer)
+# random_path = np.random.choice(path_list, size=1)[0]
+[bbox_dict, (cropped_array, pts_list, image)], res_code = Detection(net, random_path)
 
 
-# In[230]:
+# In[392]:
 
 
 img_center = get_image_center(np.array([[0,0], [image.shape[0]-1, image.shape[1]-1]])) 
 cropped_array, total_ratio, pts = filterNweight2(pts_list, img_center, image, cropped_array, n_crop=4)
 
 
-# In[58]:
+# In[393]:
 
 
 plate_array = []
-for img in cropped_array:
-    plate_array.append(rotate_plate_img(img))
+for cropped_img, pt in zip(cropped_array, pts):
+    plate_array.append(rotate_plate_img(image, pt, cropped_img))
 plate_array = np.array(plate_array)
 
 
-# In[249]:
-
-
-image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-image[ img_center[0]-5 : img_center[0]+5, img_center[1]-5: img_center[1]+5] = (0,0, 255)
-Image.fromarray(image)
-
-
-# In[60]:
+# In[394]:
 
 
 start_time = time.time()
@@ -858,13 +849,21 @@ print('elapsed time : ', time.time() - start_time)
 recognition_list
 
 
-# In[61]:
+# In[395]:
 
 
 start_time = time.time()
 recognition_list = recog_run(opt, 'cpu', model, plate_array)
 print('elapsed time : ', time.time() - start_time)
 recognition_list
+
+
+# In[384]:
+
+
+image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+# image[ img_center[0]-5 : img_center[0]+5, img_center[1]-5: img_center[1]+5] = (0,0, 255)
+Image.fromarray(image)
 
 
 # In[ ]:
@@ -879,121 +878,23 @@ recognition_list
 # crop_df, cropped_array = fine_filtering(crop_df, cropped_array )
 
 
-# In[235]:
+# In[385]:
 
 
-img_arr = cropped_array[0]
-img_arr.shape
+Image.fromarray(plate_array[0])
 
 
-# In[253]:
+# In[2]:
 
 
-Image.fromarray(image[171:289, 290:517])
+import numpy as np
+np.log10(100)
 
 
-# In[254]:
-
-
-pts[0]
-
-
-# In[257]:
-
-
-pts_refine = []
-for col, row in (pts[0]):
-    pts_refine.append([row, col])
-pts_refine = np.array(pts_refine)
-
-
-# In[258]:
-
-
-pts_refine
-
-
-# In[259]:
-
-
-l_t, r_t, r_b, l_b = pts[0]
-
-
-# In[237]:
-
-
-l_t
-
-
-# In[238]:
-
-
-l_b
-
-
-# In[239]:
-
-
-if abs(l_t[1] - l_b[1]) < 10:
-    print('no rotation')
-else:
-    if l_t[1] > l_b[1]:
-        direction = 'non-clockwise'
-    else:
-        direction = 'clockwise'
-        
-        height = l_b[0]  - l_t[0] 
-    #     width= l_t[1] - l_b[1]
-    hypotenus = np.linalg.norm(l_t - l_b)
-
-
-
-    if height == hypotenus:
-        print('nothing to rotate')
-
-    else:
-        if direction =='clockwise':
-            temp_angle = np.degrees(np.arcsin(height / hypotenus))
-            side_angle = 180-temp_angle
-            angle = 180 - (side_angle + 90)
-        else:
-            angle = np.degrees(np.arcsin(height / hypotenus))
-    #     if height > width :
-    #         angle = -angle
-
-        center_coord = get_image_center(np.array([[0,0], [image.shape[0]-1, image.shape[1]-1]]))
-        rotation_matrix = cv2.getRotationMatrix2D(center =center_coord, angle=angle, scale=0.95 )
-        rotated_img = cv2.warpAffine(image, M=rotation_matrix, dsize= (image.shape[1], image.shape[0]))
-
-
-# In[242]:
-
-
-direction
-
-
-# In[240]:
-
-
-angle
-
-
-# In[231]:
+# In[387]:
 
 
 Image.fromarray(cv2.cvtColor(cropped_array[0], cv2.COLOR_BGR2RGB))
-
-
-# In[65]:
-
-
-Image.fromarray(cv2.cvtColor(plate_array[0], cv2.COLOR_BGR2RGB))
-
-
-# In[241]:
-
-
-Image.fromarray(cv2.cvtColor(rotated_img, cv2.COLOR_BGR2RGB))
 
 
 # In[36]:
@@ -1016,7 +917,7 @@ example = recognition_list
 # - 제조사만 동일하고 제품명이 다를 경우 거르기 -> threshold 기준을 어떻게 설정할 것인가(main 키워드와 운이좋게 매치됬을경우 고려)
 # - 제조사 영어로 되있을시 
 
-# In[145]:
+# In[142]:
 
 
 lexicon = pd.read_csv('/Data/FoodDetection/Serving/ocr/pipeline/OCR_lexicon_pre.csv' ,error_bad_lines=False)
@@ -1034,7 +935,13 @@ lexicon = pd.read_csv('/Data/FoodDetection/Serving/ocr/pipeline/OCR_lexicon_pre.
 lexicon[lexicon['preprocess'].map(lambda x : True if re.compile('골뱅이').match(x) else False)]
 
 
-# In[158]:
+# In[156]:
+
+
+example = recognition_list
+
+
+# In[157]:
 
 
 rest_sum = sum(list(filter(lambda x : x >= total_ratio.mean(), total_ratio)))
@@ -1043,23 +950,7 @@ threshold =  (rest_sum * 0.7 )/ (len(example)+2)
 threshold
 
 
-# In[31]:
-
-
-# filtered_ratio = list(filter(lambda x : x >= total_ratio.mean(), total_ratio))
-# rest_sum = sum(filtered_ratio)
-# threshold =  (rest_sum * 0.7 )/ (len(filtered_ratio))
-# # if rest_sum < 1 else  rest_sum /  (len(example) * 10**-1)
-# threshold
-
-
-# In[159]:
-
-
-example = recognition_list
-
-
-# In[160]:
+# In[158]:
 
 
 start_time = time.time()
