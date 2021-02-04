@@ -55,9 +55,10 @@ import torch
 import traceback
 import crop_words_
 import re
-sys.path.append('/Data/FoodDetection/Serving/ocr/pipeline/CRAFT_pytorch')
+sys.path.append('/home/Data/FoodDetection/Serving/ocr/pipeline/CRAFT_pytorch')
 from edit_distance import lexicon_search, get_weight_df, fine_filtering, get_weight_ratio, get_image_center, filterNweight
 from collections import Counter, defaultdict
+home = '/home'
 
 
 # In[2]:
@@ -159,7 +160,7 @@ def copyStateDict(state_dict):
 
 
 #craft_mlt_25k.pth
-args = {"trained_model":'/Data/FoodDetection/Serving/ocr/pipeline/craft_mlt_25k.pth',
+args = {"trained_model":home+'/Data/FoodDetection/Serving/ocr/pipeline/craft_mlt_25k.pth',
         "text_threshold":0.7,
         "low_text":0.4,
         "link_threshold":0.4,
@@ -334,7 +335,7 @@ for num in range(num_bboxes):
 
 # -----
 
-# In[8]:
+# In[ ]:
 
 
 import json
@@ -358,11 +359,12 @@ import easydict
 import cv2
 
 import sys
-sys.path.append('/Data/FoodDetection/AI_OCR/Whatiswrong')
-sys.path.append('/Data/FoodDetection/AI_OCR//Scatter')
-sys.path.append('/Data/FoodDetection/AI_OCR//RobustScanner')
-sys.path.append('/Data/FoodDetection/AI_OCR//Nchar_clf')
-sys.path.append('/Data/FoodDetection/AI_OCR//EFIFSTR_torch')
+
+sys.path.append(home+'/Data/FoodDetection/AI_OCR/Whatiswrong')
+sys.path.append(home+'/Data/FoodDetection/AI_OCR//Scatter')
+sys.path.append(home+'/Data/FoodDetection/AI_OCR//RobustScanner')
+sys.path.append(home+'/Data/FoodDetection/AI_OCR//Nchar_clf')
+sys.path.append(home+'/Data/FoodDetection/AI_OCR//EFIFSTR_torch')
 import re
 import six
 import math
@@ -391,14 +393,14 @@ from tensorflow.keras.preprocessing.image import array_to_img
 import BaseModel_efif
 
 
-# In[8]:
+# In[ ]:
 
 
 import importlib
 importlib.reload(crop_words_)
 
 
-# In[9]:
+# In[ ]:
 
 
 # opt
@@ -429,16 +431,21 @@ opt.mid_n_cls = len(middle_converter.character)
 opt.bot_n_cls = len(bottom_converter.character)
 
 
-# In[388]:
+# In[ ]:
 
 
 model = BaseModel.model(opt, device)
-model.load_state_dict(torch.load('/Data/FoodDetection/AI_OCR/models/RobustScanner_1221/0/best_accuracy_96.54.pth', map_location='cpu' if device.type=='cpu' else 'cuda')) 
+model.load_state_dict(torch.load(home+'/Data/FoodDetection/AI_OCR/models/RobustScanner_1223/0/best_accuracy_96.83.pth', map_location='cpu' if device.type=='cpu' else 'cuda')) 
 model.to(device)
 _ = model.eval()
 
+prev_model = BaseModel.model(opt, device)
+prev_model.load_state_dict(torch.load(home+'/Data/FoodDetection/AI_OCR/models/RobustScanner_1221/0/best_accuracy_94.96.pth', map_location='cpu' if device.type=='cpu' else 'cuda')) 
+prev_model.to(device)
+_ = prev_model.eval()
 
-# In[389]:
+
+# In[ ]:
 
 
 def recog_run(opt, device, model, cropped_imgs=None):
@@ -471,10 +478,10 @@ def recog_run(opt, device, model, cropped_imgs=None):
         #raise (AssertionError('tensor should have 4 dimension including batch size on 0th index. and make sure positioning channel on 1 or 3th index'))
     
     batch_size = cropped_imgs.shape[0]
-    print('-'*40)
-    print('input type : ', type(cropped_imgs))
-    print('input shape : ' ,cropped_imgs.shape)
-    print('-'*40)
+#     print('-'*40)
+#     print('input type : ', type(cropped_imgs))
+#     print('input shape : ' ,cropped_imgs.shape)
+#     print('-'*40)
     stream = utils.CustomDataset_inf(cropped_imgs, resize_shape=(opt.imgH, opt.imgW), transformer=ToTensor())
     loader = DataLoader(stream, batch_size=batch_size, shuffle=False, num_workers=1)
     iterer = iter(loader)
@@ -506,7 +513,7 @@ def recog_run(opt, device, model, cropped_imgs=None):
     return recognition_list
 
 
-# In[390]:
+# In[ ]:
 
 
 def Detection(net, urlFilepath):
@@ -633,7 +640,7 @@ def Detection(net, urlFilepath):
 #     return data
 
 
-# In[13]:
+# In[ ]:
 
 
 def get_weight_df(pts_list, img_center, recognition_list):
@@ -655,7 +662,7 @@ def get_weight_df(pts_list, img_center, recognition_list):
     return crop_df, image_area
 
 
-# In[14]:
+# In[ ]:
 
 
 def fine_filtering(crop_df, cropped_array, n_crop=4):
@@ -666,7 +673,7 @@ def fine_filtering(crop_df, cropped_array, n_crop=4):
     return crop_df, cropped_array
 
 
-# In[15]:
+# In[ ]:
 
 
 def get_weight_ratio(crop_df, img_center):
@@ -684,7 +691,7 @@ def get_weight_ratio(crop_df, img_center):
     return total_ratio.values
 
 
-# In[162]:
+# In[ ]:
 
 
 def filterNweight2(pts_list, img_center, image, cropped_array,  n_crop=4):
@@ -729,21 +736,21 @@ def filterNweight2(pts_list, img_center, image, cropped_array,  n_crop=4):
     return cropped_array, total_ratio.values, pts_list[filtered_idx]
 
 
-# In[17]:
+# In[18]:
 
 
-base_dir = '/Data/FoodDetection/AI_OCR/CRAFT/test_img'
+base_dir = home+'/Data/FoodDetection/AI_OCR/CRAFT/test_img'
 file_names = os.listdir(base_dir)
 abs_paths = [os.path.join(base_dir, x) for x in file_names ]
 
 
-# In[18]:
+# In[19]:
 
 
 import glob
 
 
-# In[19]:
+# In[9]:
 
 
 def get_jpg_files(input_dir):
@@ -756,7 +763,7 @@ def get_jpg_files(input_dir):
     return file_path_list
 
 
-# In[107]:
+# In[10]:
 
 
 def rotate_plate_img(image, pts, cropped_img):
@@ -798,41 +805,38 @@ def rotate_plate_img(image, pts, cropped_img):
             y_max = int(pts_rotated[1].max())
             x_min = int(pts_rotated[0].min())
             x_max = int(pts_rotated[0].max())
-            
-            cropped_img = rotated_img[y_min:y_max, x_min:x_max]
+            y_expand_length = int((y_max - y_min)*0.05)
+            x_expand_length = int((x_max - x_min)*0.05)
+            cropped_img = rotated_img[y_min - y_expand_length : y_max + y_expand_length , x_min - x_expand_length : x_max + x_expand_length]
     
         return cropped_img
-
-
-# In[21]:
-
-
-path_list = get_jpg_files('/Data/FoodDetection/data/lexicon/raw/')
 
 
 # In[22]:
 
 
-iterer = iter(path_list)
+path_list = get_jpg_files(home + '/Data/FoodDetection/data/lexicon/raw/')
 
 
-# In[391]:
+# In[23]:
+
+
+# iterer = iter(path_list)
+
+
+# In[989]:
 
 
 # path = next(iterer)
-# random_path = np.random.choice(path_list, size=1)[0]
+random_path = np.random.choice(path_list, size=1)[0]
 [bbox_dict, (cropped_array, pts_list, image)], res_code = Detection(net, random_path)
 
 
-# In[392]:
+# In[990]:
 
 
 img_center = get_image_center(np.array([[0,0], [image.shape[0]-1, image.shape[1]-1]])) 
 cropped_array, total_ratio, pts = filterNweight2(pts_list, img_center, image, cropped_array, n_crop=4)
-
-
-# In[393]:
-
 
 plate_array = []
 for cropped_img, pt in zip(cropped_array, pts):
@@ -840,29 +844,27 @@ for cropped_img, pt in zip(cropped_array, pts):
 plate_array = np.array(plate_array)
 
 
-# In[394]:
+# In[991]:
 
 
-start_time = time.time()
-recognition_list = recog_run(opt, 'cpu', model, cropped_array)
-print('elapsed time : ', time.time() - start_time)
-recognition_list
-
-
-# In[395]:
-
-
-start_time = time.time()
+prev_crop = recog_run(opt, 'cpu', prev_model, cropped_array)
+prev_plate = recog_run(opt, 'cpu', prev_model, plate_array)
 recognition_list = recog_run(opt, 'cpu', model, plate_array)
-print('elapsed time : ', time.time() - start_time)
-recognition_list
+pd.DataFrame({'prev_crop' : prev_crop, 'prev_plate' : prev_plate, 'new_plate' : recognition_list})
 
 
-# In[384]:
+# In[971]:
+
+
+print(prev_crop,'\n',prev_plate,'\n', recognition_list)
+
+
+# In[985]:
 
 
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 # image[ img_center[0]-5 : img_center[0]+5, img_center[1]-5: img_center[1]+5] = (0,0, 255)
+# image[ pts_list[0][0][1]-10 : pts_list[0][0][1]+10, pts_list[0][0][0]-10: pts_list[0][0][0]+10] = (255, 0, 0 )
 Image.fromarray(image)
 
 
@@ -878,20 +880,13 @@ Image.fromarray(image)
 # crop_df, cropped_array = fine_filtering(crop_df, cropped_array )
 
 
-# In[385]:
+# In[973]:
 
 
-Image.fromarray(plate_array[0])
+Image.fromarray(cv2.cvtColor(plate_array[0], cv2.COLOR_BGR2RGB))
 
 
-# In[2]:
-
-
-import numpy as np
-np.log10(100)
-
-
-# In[387]:
+# In[974]:
 
 
 Image.fromarray(cv2.cvtColor(cropped_array[0], cv2.COLOR_BGR2RGB))
@@ -906,21 +901,92 @@ Image.fromarray(cv2.cvtColor(cropped_array[0], cv2.COLOR_BGR2RGB))
 
 # ## lexicon search
 
-# In[114]:
+# In[1003]:
 
 
-# example = ['도나스','오뚜기','행복한','간식시간']
-example = recognition_list
+example = '포도100_Taslioog_자연은_WoongiIn'
+example = example.split('_')
+# example = recognition_list
 
 
-# ### 고려사항
-# - 제조사만 동일하고 제품명이 다를 경우 거르기 -> threshold 기준을 어떻게 설정할 것인가(main 키워드와 운이좋게 매치됬을경우 고려)
-# - 제조사 영어로 되있을시 
+# -------
 
-# In[142]:
+# In[1011]:
 
 
-lexicon = pd.read_csv('/Data/FoodDetection/Serving/ocr/pipeline/OCR_lexicon_pre.csv' ,error_bad_lines=False)
+import kenlm
+
+
+# In[1035]:
+
+
+# model = kenlm.Model('/home/Data/etc/Robust_ASR/data/zeroth/zeroth.lm.fg.arpa')
+import pickle
+
+
+# In[1038]:
+
+
+small_lm = pickle.load(open('/home/Data/etc/Robust_ASR/data/zeroth/zeroth.lm.tgmed.arpa', 'rb'))
+
+
+# In[1039]:
+
+
+small_lm = kenlm.LanguageModel('/home/Data/etc/Robust_ASR/data/zeroth/zeroth.lm.tgmed.arpa')
+
+
+# In[1073]:
+
+
+sum(prob for prob, _,_ in small_lm.full_scores(''))
+
+
+# In[1081]:
+
+
+small_lm.score('thi')
+
+
+# In[17]:
+
+
+get_ipython().system(' pip install sentencepiece')
+
+
+# In[22]:
+
+
+sys.path.append('/home/Data/FoodDetection/AI_OCR/embedding')
+from models.word_eval import WordEmbeddingEvaluator
+
+
+# In[ ]:
+
+
+WordEmbeddingEvaluator(vecs_tex)
+
+
+# ----------
+
+# In[ ]:
+
+
+### 고려사항
+- 제조사만 동일하고 제품명이 다를 경우 거르기 -> threshold 기준을 어떻게 설정할 것인가(main 키워드와 운이좋게 매치됬을경우 고려)
+- 제조사 영어로 되있을시 
+
+
+# In[43]:
+
+
+lexicon = pd.read_csv(home+'/Data/FoodDetection/Serving/ocr/pipeline/OCR_lexicon_pre.csv' ,error_bad_lines=False)
+
+
+# In[1007]:
+
+
+lexicon[lexicon['preprocess'].apply(lambda x : True if re.compile('알로에').search(x) else False)]
 
 
 # In[276]:
@@ -929,19 +995,13 @@ lexicon = pd.read_csv('/Data/FoodDetection/Serving/ocr/pipeline/OCR_lexicon_pre.
 # lexicon = pd.concat([lexicon, pd.DataFrame([{'FOOD_CD' : 'G012421445', 'preprocess' : 'lotte_행복한주말_사랑나눔'}]) ], axis=0 , ignore_index=True) 
 
 
-# In[596]:
-
-
-lexicon[lexicon['preprocess'].map(lambda x : True if re.compile('골뱅이').match(x) else False)]
-
-
-# In[156]:
+# In[201]:
 
 
 example = recognition_list
 
 
-# In[157]:
+# In[1004]:
 
 
 rest_sum = sum(list(filter(lambda x : x >= total_ratio.mean(), total_ratio)))
@@ -950,7 +1010,7 @@ threshold =  (rest_sum * 0.7 )/ (len(example)+2)
 threshold
 
 
-# In[158]:
+# In[1005]:
 
 
 start_time = time.time()
@@ -994,7 +1054,7 @@ else:
 print('elapsed time : ', time.time() - start_time)
 
 
-# In[161]:
+# In[1006]:
 
 
 lexicon = lexicon.sort_values(by = ['ed'],ascending=False)
