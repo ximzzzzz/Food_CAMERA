@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[2]:
 
 
 import pandas as pd
@@ -11,7 +11,7 @@ from soynlp.hangle import levenshtein, jamo_levenshtein
 import re
 
 
-# In[2]:
+# In[3]:
 
 
 home = '/home'
@@ -21,16 +21,10 @@ lexicon = pd.read_csv(lexicon_path)
 # orig_lexicon = lexicon['preprocess'][:2151]
 
 
-# In[3]:
+# In[4]:
 
 
 orig_lexicon = lexicon['preprocess']
-
-
-# In[39]:
-
-
-list(filter(lambda x : re.compile('카레').search(x), orig_lexicon))
 
 
 # In[15]:
@@ -101,12 +95,6 @@ for lexicon_word in word_count[0].keys():
 
 
 test_words = get_ed1_words(test_word)
-
-
-# In[114]:
-
-
-test_words
 
 
 # In[115]:
@@ -265,45 +253,184 @@ for product in orig_lexicon:
     bigram_lexicon = bigram_lexicon + facto
 
 
-# In[9]:
+# In[7]:
 
 
 bigram_lexicon = set(bigram_lexicon)
 
 
-# In[10]:
+# In[8]:
 
 
-# test ed search
-test_word = ['카리','3분']
-test_list_corr = '스팬_클래식'
-ed_list = []
-for lexicon_word in bigram_lexicon:
-    if levenshtein(test_list_corr, lexicon_word)==1:
-        ed_list.append(lexicon_word)
+from copy import deepcopy 
 
-least_ed = 1
-correction_name = test_list_corr
-# correction_list = {}
-for ed_nominated in ed_list:
-    jamo_ed = jamo_levenshtein(ed_nominated, test_list_corr)
-    if least_ed > jamo_ed:
-        least_ed = jamo_ed
-        correction_name = ed_nominated
-#     correction_list[ed_nominated] =jamo_ed
-correction_name
+def bigram_combination(recognition_list, index):
+    target = recognition_list[index]
+    recog_list = deepcopy(recognition_list)
+    recog_list.remove(target)
+    combination = []
+    for recog in recog_list:
+        combination.append(target+'_'+recog)
+    return combination
 
 
-# In[221]:
+# In[9]:
 
 
-list(bigram_lexicon).index('스팸_클래식')
+recognition_list = ['임웨이' ,'아라비카']
+combinations = bigram_combination(recognition_list, 0)
+combinations
+
+
+# In[105]:
+
+
+recognition_corrected = {}
+for idx, target in enumerate(recognition_list):
+    corrected = False
+    edit_distance1 = []
+    target_combos = bigram_combination(recognition_list, idx)
+    for target_combo in target_combos:
+#         for lexicon_word in bigram_lexicon:
+#             if levenshtein(target_combo, lexicon_word)==1:
+#                 edit_distance1.append(lexicon_word)
+
+        
+        if len(edit_distance1)==0:
+            print(f'target : {target}, target_ : {target_combo}, nothing correct')
+#             recognition_corrected[idx] = target
+            recognition_list[idx] = target
+            
+        else:
+            least_ed = 1
+            correction_result = target_combo
+            # correction_list = {}
+            for ed1_lexicon in edit_distance1:
+                jamo_ed = jamo_levenshtein(ed1_lexicon, target_combo)
+    #             print(f'jamo levenshtein [{target_} : {ed_nominated}] = {jamo_ed}')
+                if least_ed > jamo_ed:
+                    least_ed = jamo_ed
+                    correction_result = ed1_lexicon
+
+            #     correction_list[ed_nominated] =jamo_ed
+            correction_result = correction_result.split('_')[0]
+            recognition_list[idx] = correction_result
+#             recognition_corrected[idx] = correction_result
+            corrected = True
+
+        if corrected:
+            print('correction process finished stop next search')
+            break   
+
+
+# In[1]:
+
+
+from multiprocessing import Pool
+import multiprocessing as mp
+
+
+# In[11]:
+
+
+num_cores = mp.cpu_count()
+
+
+# In[15]:
+
+
+bigram_lexicon_split = np.array_split(list(bigram_lexicon), num_cores/2)
+
+
+# In[27]:
+
+
+def parallel_func(bigram_lexicon):
+    combination =  combinations[0]
+#     combinations[0], bigram_lexicon = args
+    ed1_word = []
+    for lexicon_word in bigram_lexicon:
+        if levenshtein(combination, lexicon_word)==1:
+            ed1_word.append(lexicon_word)
+    return ed1_word
+
+
+# In[36]:
+
+
+def mp_search(bigram_lexicon_split)
+
+    pool = Pool(int(num_cores/2))
+    map_filter_res = list(filter(lambda x : len(x)!=0, pool.map(parallel_func, bigram_lexicon_split)))
+    pool.close()
+    pool.join()
+    
+    return map_filter_res[0]
+
+
+# In[38]:
+
+
+map_filter_res[0]
+
+
+# In[106]:
+
+
+recognition_list
+
+
+# In[44]:
+
+
+list(bigram_lexicon).index('서울우유_딸기')
+
+
+# In[16]:
+
+
+bigram_lexicon
 
 
 # In[196]:
 
 
 list(correction_list)
+
+
+# In[112]:
+
+
+import time
+import multiprocessing as mp
+
+
+# In[111]:
+
+
+start_time = time.time()
+
+def count(name):
+    for i in range(50000):
+        if i % 10 ==0:
+            print(name,i)
+        
+num_list = ['p1','p2','p3','p4']
+
+for num in num_list:
+    count(num)
+print(time.time() - start_time)
+
+
+# In[113]:
+
+
+start_time = time.time()
+pool = mp.Pool(processes=4)
+pool.map(count, num_list)
+pool.close()
+pool.join()
+print(time.time() - start_time)
 
 
 # In[ ]:
