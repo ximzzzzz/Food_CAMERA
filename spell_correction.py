@@ -244,7 +244,7 @@ def get_factorial(product):
     return factorial
 
 
-# In[6]:
+# In[88]:
 
 
 bigram_lexicon = []
@@ -253,7 +253,13 @@ for product in orig_lexicon:
     bigram_lexicon = bigram_lexicon + facto
 
 
-# In[7]:
+# In[75]:
+
+
+orig_lexicon
+
+
+# In[89]:
 
 
 bigram_lexicon = set(bigram_lexicon)
@@ -274,80 +280,90 @@ def bigram_combination(recognition_list, index):
     return combination
 
 
-# In[9]:
-
-
-recognition_list = ['임웨이' ,'아라비카']
-combinations = bigram_combination(recognition_list, 0)
-combinations
-
-
-# In[105]:
-
-
-recognition_corrected = {}
-for idx, target in enumerate(recognition_list):
-    corrected = False
-    edit_distance1 = []
-    target_combos = bigram_combination(recognition_list, idx)
-    for target_combo in target_combos:
-#         for lexicon_word in bigram_lexicon:
-#             if levenshtein(target_combo, lexicon_word)==1:
-#                 edit_distance1.append(lexicon_word)
-
-        
-        if len(edit_distance1)==0:
-            print(f'target : {target}, target_ : {target_combo}, nothing correct')
-#             recognition_corrected[idx] = target
-            recognition_list[idx] = target
-            
-        else:
-            least_ed = 1
-            correction_result = target_combo
-            # correction_list = {}
-            for ed1_lexicon in edit_distance1:
-                jamo_ed = jamo_levenshtein(ed1_lexicon, target_combo)
-    #             print(f'jamo levenshtein [{target_} : {ed_nominated}] = {jamo_ed}')
-                if least_ed > jamo_ed:
-                    least_ed = jamo_ed
-                    correction_result = ed1_lexicon
-
-            #     correction_list[ed_nominated] =jamo_ed
-            correction_result = correction_result.split('_')[0]
-            recognition_list[idx] = correction_result
-#             recognition_corrected[idx] = correction_result
-            corrected = True
-
-        if corrected:
-            print('correction process finished stop next search')
-            break   
-
-
-# In[1]:
+# In[85]:
 
 
 from multiprocessing import Pool
 import multiprocessing as mp
+from functools import partial
+from itertools import repeat
+import time
 
 
-# In[11]:
+# In[90]:
 
 
+recognition_list = ['마켓오', '초코클래식미나']
+combinations = bigram_combination(recognition_list, 0)
+combinations
+
+
+# In[106]:
+
+
+start_time = time.time()
 num_cores = mp.cpu_count()
+bigram_lexicon_split = np.array_split(list(bigram_lexicon), int(num_cores/2))
+with Pool(int(num_cores/2)) as pool:
+    for idx, target in enumerate(recognition_list):
+        corrected = False
+        edit_distance1 = []
+        target_combos = bigram_combination(recognition_list, idx)
+        for target_combo in target_combos:
+    #         for lexicon_word in bigram_lexicon:
+    #             if levenshtein(target_combo, lexicon_word)==1:
+    #                 edit_distance1.append(lexicon_word)
+            edit_distance1 = list(filter(lambda x : len(x)!=0, pool.starmap(get_editdistance1, zip(repeat(target_combo), bigram_lexicon_split))))
+
+            if len(edit_distance1)==0:
+                print(f'target : {target}, target_ : {target_combo}, nothing correct')
+                recognition_list[idx] = target
+
+            else:
+                least_ed = 1
+                correction_result = target_combo
+                # correction_list = {}
+                for ed1_lexicon in edit_distance1:
+                    jamo_ed = jamo_levenshtein(ed1_lexicon, target_combo)
+        #             print(f'jamo levenshtein [{target_} : {ed_nominated}] = {jamo_ed}')
+                    if least_ed > jamo_ed:
+                        least_ed = jamo_ed
+                        correction_result = ed1_lexicon
+
+                correction_result = correction_result.split('_')[0]
+                recognition_list[idx] = correction_result
+                corrected = True
+
+            if corrected:
+                print('correction process finished stop next search')
+                break   
+
+print(time.time() - start_time)
+
+
+# In[97]:
+
+
+target_combo
+
+
+# In[96]:
+
+
+ed1_lexicon
 
 
 # In[15]:
 
 
+num_cores = mp.cpu_count()
 bigram_lexicon_split = np.array_split(list(bigram_lexicon), num_cores/2)
 
 
-# In[27]:
+# In[79]:
 
 
-def parallel_func(bigram_lexicon):
-    combination =  combinations[0]
-#     combinations[0], bigram_lexicon = args
+def get_editdistance1(combination, bigram_lexicon):
     ed1_word = []
     for lexicon_word in bigram_lexicon:
         if levenshtein(combination, lexicon_word)==1:
@@ -355,82 +371,36 @@ def parallel_func(bigram_lexicon):
     return ed1_word
 
 
-# In[36]:
+# In[69]:
 
 
-def mp_search(bigram_lexicon_split)
+def mp_search(bigram_lexicon_split):
 
     pool = Pool(int(num_cores/2))
-    map_filter_res = list(filter(lambda x : len(x)!=0, pool.map(parallel_func, bigram_lexicon_split)))
+#     map_filter_res = list(filter(lambda x : len(x)!=0, pool.map(partial(parallel_func, combination = combinations[0]), bigram_lexicon_split)))
+    map_filter_res = list(filter(lambda x : len(x)!=0, pool.starmap(parallel_func, zip(repeat(combinations[0]), bigram_lexicon_split))))
     pool.close()
     pool.join()
     
     return map_filter_res[0]
 
 
-# In[38]:
+# In[ ]:
 
 
-map_filter_res[0]
+pool.starmap(func, zip(a_args, repeat(second_arg)))
 
 
-# In[106]:
+# In[70]:
 
 
-recognition_list
+mp_search(bigram_lexicon_split)
 
 
-# In[44]:
+# In[107]:
 
 
-list(bigram_lexicon).index('서울우유_딸기')
-
-
-# In[16]:
-
-
-bigram_lexicon
-
-
-# In[196]:
-
-
-list(correction_list)
-
-
-# In[112]:
-
-
-import time
-import multiprocessing as mp
-
-
-# In[111]:
-
-
-start_time = time.time()
-
-def count(name):
-    for i in range(50000):
-        if i % 10 ==0:
-            print(name,i)
-        
-num_list = ['p1','p2','p3','p4']
-
-for num in num_list:
-    count(num)
-print(time.time() - start_time)
-
-
-# In[113]:
-
-
-start_time = time.time()
-pool = mp.Pool(processes=4)
-pool.map(count, num_list)
-pool.close()
-pool.join()
-print(time.time() - start_time)
+list(bigram_lexicon).index('오렌지_고칼슘')
 
 
 # In[ ]:
