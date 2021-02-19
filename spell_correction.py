@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[1]:
 
 
 import pandas as pd
@@ -11,7 +11,7 @@ from soynlp.hangle import levenshtein, jamo_levenshtein
 import re
 
 
-# In[3]:
+# In[2]:
 
 
 home = '/home'
@@ -27,7 +27,7 @@ lexicon = pd.read_csv(lexicon_path)
 orig_lexicon = lexicon['preprocess']
 
 
-# In[15]:
+# In[4]:
 
 
 word_count = defaultdict(Counter)
@@ -65,7 +65,7 @@ for word in orig_lexicon:
         word_count_ed[0][word_splitted]
 
 
-# In[108]:
+# In[7]:
 
 
 word_count[0]
@@ -164,26 +164,81 @@ ed_1
 jamo_ed_1
 
 
-# In[188]:
+# ---------
+
+# ## 그냥 해보자
+
+# In[53]:
 
 
-test_word = '농삼'
-ed_1 = []
-for lexicon_word in word_count[0].keys():
-    if levenshtein(test_word, lexicon_word)==1:
-        ed_1.append(lexicon_word)
-
-jamo_ed_1 = {}
-for ed_ in ed_1:
-    jamo_ed = round(jamo_levenshtein(test_word, ed_),4)
-    jamo_ed_1[ed_] = jamo_ed
+import time
+from multiprocessing import Pool
+import multiprocessing as mp
+from functools import partial
+from itertools import repeat
 
 
-# In[189]:
+# In[51]:
 
 
-jamo_ed_1
+recognition_list = ['Minj', '오에스', '흐태', '버더와플']
 
+
+# In[21]:
+
+
+def get_ed_1(test_word,word_count_split):
+    ed_1 = []
+    for lexicon_word in word_count_split:
+        if levenshtein(test_word, lexicon_word)==1:
+            ed_1.append(lexicon_word)
+    return ed_1
+
+
+# In[81]:
+
+
+start_time = time.time()
+num_cores = mp.cpu_count()
+num_cores_use = int(num_cores/4)
+word_count_split = np.array_split(list(word_count[0].keys()), num_cores_use)
+
+corrected_idx = np.ones(len(recognition_list))
+with Pool(num_cores_use) as pool:
+    for idx, test_word in enumerate(recognition_list):
+
+        ed_1 = list(filter(lambda x: len(x)!=0, pool.starmap(get_ed_1, zip(repeat(test_word), word_count_split))))
+        ed_1 = [two_dimensions for one_dimension in ed_1 for two_dimensions in one_dimension]
+        if len(ed_1)==0:
+#             print(f'test_word : {test_word} -> {test_word}')
+            continue
+        
+        jamo_ed_1 = {}
+        for ed_ in ed_1:
+            jamo_ed = round(jamo_levenshtein(test_word, ed_),4)
+            jamo_ed_1[ed_] = jamo_ed
+        if len(jamo_ed_1)==0:
+#             print(f'test_word : {test_word} -> {test_word}')
+            continue
+#         print(f'test_word : {test_word} -> {sorted(jamo_ed_1.items(), key=lambda x : x[1])[0][0]}')
+        recognition_list[idx] = sorted(jamo_ed_1.items(), key=lambda x : x[1])[0][0]
+        corrected_idx[idx] = 1.2
+print(time.time() - start_time)
+
+
+# In[77]:
+
+
+recognition_list
+
+
+# In[82]:
+
+
+corrected_idx
+
+
+# --------------
 
 # In[128]:
 
@@ -227,7 +282,57 @@ def get_correction(test_word):
 get_correction('jawelfj')
 
 
-# In[5]:
+# In[121]:
+
+
+list(filter(lambda x : len(x) < 2, orig_lexicon))
+
+
+# In[80]:
+
+
+from tqdm import tqdm
+
+
+# In[119]:
+
+
+refined_lexicon = []
+for product in tqdm(orig_lexicon):
+    refined_product = product + '_'
+    
+    product_splits = product.split('_') # [매일우유, 저지방&칼슘]
+    
+    for product_split in product_splits:
+        for target in orig_lexicon:
+            target_splits = target.split('_') #[매일우유, 저지방&칼슘]
+            for target_split in target_splits:
+                if target_split=='':
+                    continue
+#                 print(f'test_split -> {target_split} 차례')
+                if product_split==target_split:
+                    continue
+                elif target_split in product_split:
+                    split_again = product_split.replace(target_split, '')
+                    
+                    if not '_'+split_again in refined_product:
+#                         print(f'{product_split} 항목에 현재 상태는 {refined_product}인데 {split_again}이 없으므로 추가하겠습니다!')
+                        refined_product = refined_product +split_again + '_'
+
+                    if not '_'+target_split in refined_product:
+#                         print(f'{product_split} 항목에 현재 상태는 {refined_product}인데 {target_split}이 없으므로 추가하겠습니다!')
+                        refined_product = refined_product +target_split + '_'
+                        
+    refined_lexicon.append(refined_product.strip('_'))
+
+
+# In[120]:
+
+
+refined_lexicon
+
+
+# In[123]:
 
 
 def get_factorial(product):
@@ -244,28 +349,38 @@ def get_factorial(product):
     return factorial
 
 
-# In[88]:
+# In[125]:
 
 
-bigram_lexicon = []
-for product in orig_lexicon:
-    facto = get_factorial(product)
-    bigram_lexicon = bigram_lexicon + facto
+def get_bigram_lexicon(orig_lexicon):
+    bigram_lexicon = []
+    for product in orig_lexicon:
+        facto = get_factorial(product)
+        bigram_lexicon = bigram_lexicon + facto
+    return bigram_lexicon
 
 
-# In[75]:
+# In[140]:
 
 
-orig_lexicon
+refined_bigram = get_bigram_lexicon(refined_lexicon)
 
 
-# In[89]:
+# In[142]:
 
 
-bigram_lexicon = set(bigram_lexicon)
+refined_bigram = list(set(refined_bigram))
+len(refined_bigram)
 
 
-# In[8]:
+# In[9]:
+
+
+bigram_lexicon = list(set(bigram_lexicon))
+bigram_lexicon
+
+
+# In[130]:
 
 
 from copy import deepcopy 
@@ -276,11 +391,12 @@ def bigram_combination(recognition_list, index):
     recog_list.remove(target)
     combination = []
     for recog in recog_list:
-        combination.append(target+'_'+recog)
+        combi = (target+'_'+recog).strip('_')
+        combination.append(combi)
     return combination
 
 
-# In[85]:
+# In[12]:
 
 
 from multiprocessing import Pool
@@ -290,20 +406,28 @@ from itertools import repeat
 import time
 
 
-# In[90]:
+# In[162]:
 
 
-recognition_list = ['마켓오', '초코클래식미나']
+# pd.DataFrame({'bigram_lexicon' : refined_bigram}).to_csv('bigram_lexicon_refined.csv', index=False)
+refined_bigram = pd.read_csv('bigram_lexicon_refined.csv')
+
+
+# In[176]:
+
+
+recognition_list = ['우유', 'Q', '11등급', 'MRILIII']
 combinations = bigram_combination(recognition_list, 0)
 combinations
 
 
-# In[106]:
+# In[177]:
 
 
 start_time = time.time()
 num_cores = mp.cpu_count()
-bigram_lexicon_split = np.array_split(list(bigram_lexicon), int(num_cores/2))
+# bigram_lexicon_split = np.array_split(list(bigram_lexicon), int(num_cores/2))
+bigram_lexicon_split = np.array_split(list(refined_bigram['bigram_lexicon']), int(num_cores/2))
 with Pool(int(num_cores/2)) as pool:
     for idx, target in enumerate(recognition_list):
         corrected = False
@@ -313,20 +437,24 @@ with Pool(int(num_cores/2)) as pool:
     #         for lexicon_word in bigram_lexicon:
     #             if levenshtein(target_combo, lexicon_word)==1:
     #                 edit_distance1.append(lexicon_word)
-            edit_distance1 = list(filter(lambda x : len(x)!=0, pool.starmap(get_editdistance1, zip(repeat(target_combo), bigram_lexicon_split))))
-
+            edit_distance1 = list(filter(lambda x : len(x)!=0, pool.starmap(get_editdistance1, zip(repeat(target_combo.lower()), bigram_lexicon_split))))
+            edit_distance1 = [two_dimension for one_dimension in edit_distance1 for two_dimension in one_dimension]
             if len(edit_distance1)==0:
-                print(f'target : {target}, target_ : {target_combo}, nothing correct')
+#                 print(f'target : {target}, target_combo : {target_combo}, nothing correct')
                 recognition_list[idx] = target
-
+                
+            elif target_combo in edit_distance1:
+                continue
+            
             else:
-                least_ed = 1
+                print(f'target : {target}, target_combo : {target_combo}, edit distance under 2 {edit_distance1}')
+                least_ed = 3
                 correction_result = target_combo
                 # correction_list = {}
                 for ed1_lexicon in edit_distance1:
                     jamo_ed = jamo_levenshtein(ed1_lexicon, target_combo)
         #             print(f'jamo levenshtein [{target_} : {ed_nominated}] = {jamo_ed}')
-                    if least_ed > jamo_ed:
+                    if least_ed >= jamo_ed:
                         least_ed = jamo_ed
                         correction_result = ed1_lexicon
 
@@ -335,22 +463,16 @@ with Pool(int(num_cores/2)) as pool:
                 corrected = True
 
             if corrected:
-                print('correction process finished stop next search')
+                print(f'correction process finished with {correction_result} stop next search')
                 break   
 
 print(time.time() - start_time)
 
 
-# In[97]:
+# In[178]:
 
 
-target_combo
-
-
-# In[96]:
-
-
-ed1_lexicon
+recognition_list
 
 
 # In[15]:
@@ -360,13 +482,16 @@ num_cores = mp.cpu_count()
 bigram_lexicon_split = np.array_split(list(bigram_lexicon), num_cores/2)
 
 
-# In[79]:
+# In[70]:
 
 
 def get_editdistance1(combination, bigram_lexicon):
     ed1_word = []
     for lexicon_word in bigram_lexicon:
-        if levenshtein(combination, lexicon_word)==1:
+        ed = levenshtein(combination, lexicon_word)
+        if ed==0:
+            return [combination]
+        elif ed<=2:
             ed1_word.append(lexicon_word)
     return ed1_word
 
