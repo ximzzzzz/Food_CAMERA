@@ -136,7 +136,50 @@ class GridMask(DualTransform):
         return ('num_grid', 'fill_value', 'rotate', 'mode')
     
     
-################## vinyl shinning ##########################
+################## lens distortion ##########################
+class LensDistortion(ImageOnlyTransform):
+
+    def __init__(self, exp_min = 0.8, exp_max = 1.2, scale=1, always_apply=False, p=0.5):
+        super(LensDistortion, self).__init__(always_apply, p)
+        self.exp_min = exp_min
+        self.exp_max = exp_max
+        self.scale = scale
+        
+    def apply(self, image, exp, **params):
+        rows, cols = image.shape[:2]
+        
+        mapy, mapx = np.indices((rows, cols),dtype=np.float32)
+        mapx = 2*mapx/(cols-1)-1
+        mapy = 2*mapy/(rows-1)-1
+
+        r, theta = cv2.cartToPolar(mapx, mapy)
+        r[r< self.scale] = r[r<self.scale] **exp  
+        mapx, mapy = cv2.polarToCart(r, theta)
+
+        mapx = ((mapx + 1)*cols-1)/2
+        mapy = ((mapy + 1)*rows-1)/2
+        distorted = cv2.remap(image ,mapx,mapy,cv2.INTER_LINEAR)
+
+        return distorted
+
+    def get_params_dependent_on_targets(self, params):
+        image = params["image"]
+        
+        exp = np.random.choice([self.exp_min+0.05, self.exp_max-0.05], size=1)[0]
+
+        
+        return { "exp": exp}
+ 
+    
+    @property
+    def targets_as_params(self):
+        return ["image"]
+
+    def get_transform_init_args_names(self):
+        return ("var_limit",)
+
+    
+################## Vinyl shining ##########################    
 class VinylShining(ImageOnlyTransform):
 
     def __init__(self, n_shinnings, always_apply=False, p=0.5):
@@ -188,7 +231,7 @@ class VinylShining(ImageOnlyTransform):
 
     def get_transform_init_args_names(self):
         return ("var_limit",)
-   
+    
 # class VinylShining(ImageOnlyTransform):
 
 #     def __init__(self, n_shinnings, always_apply=False, p=0.5):
