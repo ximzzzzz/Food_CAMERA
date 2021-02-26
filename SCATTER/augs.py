@@ -134,7 +134,47 @@ class GridMask(DualTransform):
 
     def get_transform_init_args_names(self):
         return ('num_grid', 'fill_value', 'rotate', 'mode')
+
+################## barrel distortion ##########################
+class BarrelDistortion(ImageOnlyTransform):
+
+    def __init__(self, k1=0.2, k2=0, k3=0, always_apply=False, p=0.5):
+        super(BarrelDistortion, self).__init__(always_apply, p)
+        self.k1 = k1
+        self.k2 = k2
+        self.k3 = k3
+        
+    def apply(self, image, bordermode, **params):
+        rows, cols = image.shape[:2]
+        
+        mapy, mapx = np.indices((rows, cols),dtype=np.float32)
+        mapx = 2*mapx/(cols-1)-1
+        mapy = 2*mapy/(rows-1)-1
+
+        r, theta = cv2.cartToPolar(mapx, mapy)
+        ru = r*(1+self.k1*(r**2) + self.k2*(r**4) + self.k3*(r**6)) 
+        mapx, mapy = cv2.polarToCart(ru, theta)
+
+        mapx = ((mapx + 1)*cols-1)/2
+        mapy = ((mapy + 1)*rows-1)/2
+        distorted = cv2.remap(image ,mapx,mapy,cv2.INTER_LINEAR, None, bordermode)
+
+        return distorted
+
+    def get_params_dependent_on_targets(self, params):
+        image = params["image"]
+        bordermodes = [cv2.BORDER_CONSTANT, cv2.BORDER_TRANSPARENT, cv2.BORDER_REPLICATE]
+        bordermode = np.random.choice(bordermodes, size=1)[0]
+        return { "bordermode": bordermode}
+ 
     
+    @property
+    def targets_as_params(self):
+        return ["image"]
+
+    def get_transform_init_args_names(self):
+        return ("var_limit",)
+
     
 ################## lens distortion ##########################
 class LensDistortion(ImageOnlyTransform):
